@@ -1,6 +1,6 @@
 SequoiaSQL - MySQL Storage Engine
 ========================
-The SequoiaSQL - MySQL Storage Engine is a distributed MySQL storage engine.
+SequoiaSQL - MySQL Storage Engine is a distributed MySQL storage engine.
 
 It currently supports SequoiaDB 3.0 as the backend database, and it will be extended to multiple databases such like MongoDB/Redis and etc...
 
