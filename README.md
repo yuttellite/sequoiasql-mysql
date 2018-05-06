@@ -1,37 +1,27 @@
-## Welcome to GitHub Pages
+SequoiaDB Storage Engine
+========================
+The SequoiaDB Storage Engine Project provides support for SequoiaDB community within the MySQL 5.7.18. It is a plugin for the Mysql which use SequoiaDB as storage engine.
 
-You can use the [editor on GitHub](https://github.com/SequoiaDB/sequoiasql-mysql/edit/master/README.md) to maintain and preview the content for your website in Markdown files.
 
-Whenever you commit to this repository, GitHub Pages will run [Jekyll](https://jekyllrb.com/) to rebuild the pages in your site, from the content in your Markdown files.
+Building
+--------
+1. Get boost-1.59.0 and the source code of mysql-5.7.18 before building.
+2. Copy the plugin-code to the folder of mysql-5.7.18.
+   # mkdir -p mysql-5.7.18/storage/sequoiadb
+   # cp sequoiasql-mysql/* mysql-5.7.18/storage/sequoiadb
+3. Copy the lib and include file of SequoiaDB C++ driver to the folder of mysql-5.7.18.
+   # mkdir -p mysql-5.7.18/storage/sequoiadb/sequoiadb
+   # cp -r /opt/sequoiadb/include mysql-5.7.18/storage/sequoiadb/sequoiadb
+   # mkdir -p mysql-5.7.18/storage/sequoiadb/sequoiadb/lib
+   # cp /opt/sequoiadb/lib/libstaticsdbcpp.a mysql-5.7.18/storage/sequoiadb/sequoiadb/lib
+4. Build the plugin
+		# cd mysql-5.7.18
+		# cmake . -DWITH_BOOST=../thirdparty/boost/boost_1_59_0/ -DCMAKE_INSTALL_PREFIX=/opt/mysql -DMYSQL_DATADIR=/opt/mysql/data -DCMAKE_BUILD_TYPE=Release
+		# make -j 4
+		# make install
 
-### Markdown
 
-Markdown is a lightweight and easy-to-use syntax for styling your writing. It includes conventions for
-
-```markdown
-Syntax highlighted code block
-
-# Header 1
-## Header 2
-### Header 3
-
-- Bulleted
-- List
-
-1. Numbered
-2. List
-
-**Bold** and _Italic_ and `Code` text
-
-[Link](url) and ![Image](src)
-```
-
-For more details see [GitHub Flavored Markdown](https://guides.github.com/features/mastering-markdown/).
-
-### Jekyll Themes
-
-Your Pages site will use the layout and styles from the Jekyll theme you have selected in your [repository settings](https://github.com/SequoiaDB/sequoiasql-mysql/settings). The name of this theme is saved in the Jekyll `_config.yml` configuration file.
-
-### Support or Contact
-
-Having trouble with Pages? Check out our [documentation](https://help.github.com/categories/github-pages-basics/) or [contact support](https://github.com/contact) and we’ll help you sort it out.
+License
+-------
+License under the GPL License, Version 2.0. See LICENSE for more information.
+Copyright (c) 2018, SequoiaDB and/or its affiliates. All rights reserved.
