@@ -737,6 +737,7 @@ int ha_sdb::index_init(uint idx, bool sorted)
    {
       condition = empty_obj ;
    }
+   free_root(&blobroot, MYF(0));
    return 0 ;
 }
 
@@ -744,7 +745,6 @@ int ha_sdb::index_end()
 {
    cl->close() ;
    keynr = -1 ;
-   free_root(&blobroot, MYF(0));
    return 0 ;
 }
 
@@ -768,13 +768,13 @@ int ha_sdb::rnd_init(bool scan)
    {
       condition = empty_obj ;
    }
+   free_root(&blobroot, MYF(0));
    return 0 ;
 }
 
 int ha_sdb::rnd_end()
 {
    cl->close() ;
-   free_root(&blobroot, MYF(0));
    return 0 ;
 }
 
@@ -786,7 +786,6 @@ int ha_sdb::obj_to_row( bson::BSONObj &obj, uchar *buf )
    bool read_all ;
    my_bitmap_map *org_bitmap;
 
-   free_root( &blobroot, MYF(0) ) ;
    memset( buf, 0, table->s->null_bytes ) ;
 
    read_all= !bitmap_is_clear_all(table->write_set) ;
