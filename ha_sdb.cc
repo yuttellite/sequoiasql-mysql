@@ -1942,7 +1942,12 @@ static int sdb_init_func(void *p)
                      | HTON_NO_PARTITION ) ;
    sdb_hton->commit = sdb_commit ;
    sdb_hton->rollback = sdb_rollback ;
-   SDB_CONF_INST->parse_conn_addrs( sdb_addr ) ;
+   if( SDB_CONF_INST->parse_conn_addrs( sdb_addr ) )
+   {
+      sql_print_error( "SequoiaDB: invalid value "
+            "sequoiadb_conn_addr=%s", sdb_addr ) ;
+      return 1 ;
+   }
    SDB_CONF_INST->set_use_partition( sdb_use_partition ) ;
    return 0 ;
 }
@@ -1961,15 +1966,10 @@ static int sdb_conn_addrs_validate( THD * thd,
                                     void *save,
                                     struct st_mysql_value *value )
 {
-   const char * conn_addr_tmp = NULL ;
-   char buff[ SDB_CONN_ADDR_SIZE_MAX ] = {0} ;
-   int len = sizeof( buff ) ;
-   assert( save != NULL ) ;
-   assert( value != NULL ) ;
-   conn_addr_tmp = value->val_str( value, buff, &len ) ;
-   *static_cast<const char **>(save) = conn_addr_tmp ;
-
-   return SDB_CONF_INST->parse_conn_addrs( conn_addr_tmp ) ;
+   my_printf_error( HA_ERR_UNSUPPORTED, 
+                    "'sequoiadb_conn_addr' must be modified by configuration file!",
+                    MYF(0) ) ;
+   return 1 ;
 }
 
 static void sdb_use_partition_update( THD * thd,
