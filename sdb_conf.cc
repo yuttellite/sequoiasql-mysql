@@ -83,6 +83,7 @@ int sdb_conf::parse_conn_addrs( const char *conn_addr )
       }
       if ( len > 0 )
       {
+         char *p_addr = NULL ;
          const char *comma_pos = strchr( p, ',' ) ;
          const char *colon_pos = strchr( p, ':' ) ;
          if ( !colon_pos || ( comma_pos && comma_pos < colon_pos ) )
@@ -90,7 +91,7 @@ int sdb_conf::parse_conn_addrs( const char *conn_addr )
             rc = -1 ;
             goto error ;
          }
-         char *p_addr = (char *)malloc( len + 1 ) ;
+         p_addr = (char *)malloc( len + 1 ) ;
          if ( NULL == p_addr )
          {
             rc = -1 ;
