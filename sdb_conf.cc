@@ -65,40 +65,40 @@ int sdb_conf::parse_conn_addrs( const char *conn_addr )
 
    while ( *p != 0 )
    {
-      const char *pTmp = NULL ;
+      const char *p_tmp = NULL ;
       size_t len = 0 ;
       if ( coord_num >= SDB_COORD_NUM_MAX )
       {
          goto done ;
       }
 
-      pTmp = strchr(p, ',') ;
-      if ( NULL == pTmp )
+      p_tmp = strchr(p, ',') ;
+      if ( NULL == p_tmp )
       {
          len = strlen( p ) ;
       }
       else
       {
-         len = pTmp - p ;
+         len = p_tmp - p ;
       }
       if ( len > 0 )
       {
-         //pAddrs[coord_num] = (char *)my_malloc( sdb_key_memory_conf_coord_addrs,
-         //                                       len+1, MYF(MY_WME) ) ;
-         char *pAddr = (char *)malloc( len + 1 ) ;
-         if ( NULL == pAddr )
+         const char *comma_pos = strchr( p, ',' ) ;
+         const char *colon_pos = strchr( p, ':' ) ;
+         if ( !colon_pos || ( comma_pos && comma_pos < colon_pos ) )
          {
             rc = -1 ;
             goto error ;
          }
-         memcpy( pAddr, p, len ) ;
-         pAddr[len] = 0 ;
-         if ( NULL == strchr( pAddr, ':' ) )
+         char *p_addr = (char *)malloc( len + 1 ) ;
+         if ( NULL == p_addr )
          {
             rc = -1 ;
             goto error ;
          }
-         pAddrs[coord_num] = pAddr ;
+         memcpy( p_addr, p, len ) ;
+         p_addr[len] = 0 ;
+         pAddrs[coord_num] = p_addr ;
          ++coord_num ;
       }
       p += len;
