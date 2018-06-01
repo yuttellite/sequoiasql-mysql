@@ -218,7 +218,7 @@ uint ha_sdb::max_supported_key_part_length() const
 
 uint ha_sdb::max_supported_key_length() const
 {
-   return 255 ;
+   return 1024 ;
 }
 
 int ha_sdb::open( const char *name, int mode, uint test_if_locked )
