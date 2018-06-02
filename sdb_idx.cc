@@ -21,6 +21,7 @@
 #include "sdb_cl.h"
 #include "sql_table.h"
 #include "sdb_err_code.h"
+#include "include/bson/bsonDecimal.h"
 
 int sdb_create_index( const KEY *keyInfo, sdb_cl_auto_ptr cl )
 {
@@ -183,6 +184,14 @@ void get_unsigned_key_val( const uchar *key_ptr,
                if( val_tmp.int64_val >= 0)
                {
                   obj_builder.append( op_str, val_tmp.int64_val ) ;
+               }
+               else
+               {
+                  bson::bsonDecimal decimal_tmp ;
+                  char buf_tmp[24] = {0} ;
+                  sprintf( buf_tmp, "%llu", val_tmp.uint64_val ) ;
+                  decimal_tmp.fromString( buf_tmp ) ;
+                  obj_builder.append( op_str, decimal_tmp ) ;
                }
                break ;
             }
