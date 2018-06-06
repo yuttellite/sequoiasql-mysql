@@ -44,6 +44,9 @@ BOOLEAN is_field_indexable( const Field *field )
       case MYSQL_TYPE_VARCHAR:
       case MYSQL_TYPE_STRING:
       case MYSQL_TYPE_VAR_STRING:
+      case MYSQL_TYPE_TINY_BLOB:
+      case MYSQL_TYPE_MEDIUM_BLOB:
+      case MYSQL_TYPE_LONG_BLOB:
       case MYSQL_TYPE_BLOB:
          {
             if ( !field->binary() ) 
@@ -562,6 +565,9 @@ int build_match_obj_by_start_stop_key( uint keynr,
          case MYSQL_TYPE_VARCHAR:
          case MYSQL_TYPE_STRING:
          case MYSQL_TYPE_VAR_STRING:
+         case MYSQL_TYPE_TINY_BLOB:
+         case MYSQL_TYPE_MEDIUM_BLOB:
+         case MYSQL_TYPE_LONG_BLOB:
          case MYSQL_TYPE_BLOB:
             {
                if ( !keyPart->field->binary() )
