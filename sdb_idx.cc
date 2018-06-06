@@ -23,6 +23,43 @@
 #include "sdb_err_code.h"
 #include "include/bson/bsonDecimal.h"
 
+BOOLEAN is_field_indexable( const Field *field )
+{
+   switch( field->type() )
+   {
+      case MYSQL_TYPE_TINY:
+      case MYSQL_TYPE_SHORT:
+      case MYSQL_TYPE_LONG:
+      case MYSQL_TYPE_INT24:
+      case MYSQL_TYPE_FLOAT:
+      case MYSQL_TYPE_DOUBLE:
+         return TRUE ;
+      case MYSQL_TYPE_LONGLONG:
+         {
+            // unsigned long long is saved as DECIMAL. 
+            if ( !((Field_num *)(field))->unsigned_flag )
+               return TRUE ;
+            else 
+               return FALSE ;
+         }
+      case MYSQL_TYPE_VARCHAR:
+      case MYSQL_TYPE_STRING:
+      case MYSQL_TYPE_VAR_STRING:
+      case MYSQL_TYPE_TINY_BLOB:
+      case MYSQL_TYPE_MEDIUM_BLOB:
+      case MYSQL_TYPE_LONG_BLOB:
+      case MYSQL_TYPE_BLOB:
+         {
+            if ( !field->binary() ) 
+               return TRUE ;
+            else 
+               return FALSE ;
+         }
+      default:
+         return FALSE ;
+   }
+}
+
 int sdb_create_index( const KEY *keyInfo, sdb_cl_auto_ptr cl )
 {
    const KEY_PART_INFO *keyPart ;
@@ -36,15 +73,7 @@ int sdb_create_index( const KEY *keyInfo, sdb_cl_auto_ptr cl )
    keyEnd = keyPart + keyInfo->user_defined_key_parts ;
    for( ; keyPart != keyEnd ; ++keyPart )
    {
-      if ( keyPart->field->type() < MYSQL_TYPE_TINY
-         || ( keyPart->field->type() > MYSQL_TYPE_DOUBLE
-            && keyPart->field->type() != MYSQL_TYPE_VARCHAR
-            && keyPart->field->type() != MYSQL_TYPE_LONGLONG
-            && keyPart->field->type() != MYSQL_TYPE_INT24
-            && keyPart->field->type() != MYSQL_TYPE_VAR_STRING
-            && keyPart->field->type() != MYSQL_TYPE_STRING
-            && ( keyPart->field->type() != MYSQL_TYPE_BLOB
-                 || keyPart->field->binary() )))
+      if ( !is_field_indexable( keyPart->field ) )
       {
          rc = HA_ERR_UNSUPPORTED ;
          my_printf_error( rc,
@@ -312,6 +341,37 @@ void get_signed_key_range_obj( const uchar *start_key_ptr,
    obj = obj_builder.obj() ;
 }
 
+void get_int_key_range_obj( const uchar *start_key_ptr,
+                            key_part_map start_key_part_map,
+                            enum ha_rkey_function start_find_flag,
+                            const uchar *end_key_ptr,
+                            key_part_map end_key_part_map,
+                            enum ha_rkey_function end_find_flag,
+                            const KEY_PART_INFO *key_part,
+                            bson::BSONObj &obj )
+{
+   if ( !((Field_num *)(key_part->field))->unsigned_flag )
+   {
+      get_signed_key_range_obj( start_key_ptr,
+                                start_key_part_map,
+                                start_find_flag,
+                                end_key_ptr,
+                                end_key_part_map,
+                                end_find_flag,
+                                key_part, obj ) ;
+   }
+   else
+   {
+      get_unsigned_key_range_obj( start_key_ptr,
+                                  start_key_part_map,
+                                  start_find_flag,
+                                  end_key_ptr,
+                                  end_key_part_map,
+                                  end_find_flag,
+                                  key_part, obj ) ;
+   }
+}
+
 void get_text_key_val( const uchar *key_ptr,
                        key_part_map key_part_map_val,
                        const KEY_PART_INFO *key_part,
@@ -482,55 +542,25 @@ int build_match_obj_by_start_stop_key( uint keynr,
         ++keyPart )
    {
       bson::BSONObj tmp_obj ;
-      switch( keyPart->type )
+      switch( keyPart->field->type() )
       {
-         case HA_KEYTYPE_SHORT_INT:
-         case HA_KEYTYPE_LONG_INT:
-         case HA_KEYTYPE_LONGLONG:
-         case HA_KEYTYPE_INT8:
-         case HA_KEYTYPE_INT24:
+         case MYSQL_TYPE_TINY:
+         case MYSQL_TYPE_SHORT:
+         case MYSQL_TYPE_LONG:
+         case MYSQL_TYPE_INT24:
+         case MYSQL_TYPE_LONGLONG:
             {
-               get_signed_key_range_obj( startKeyPtr,
-                                         startKeyPartMap,
-                                         find_flag,
-                                         endKeyPtr,
-                                         endKeyPartMap,
-                                         endFindFlag,
-                                         keyPart, tmp_obj ) ;
+               get_int_key_range_obj( startKeyPtr,
+                                      startKeyPartMap,
+                                      find_flag,
+                                      endKeyPtr,
+                                      endKeyPartMap,
+                                      endFindFlag,
+                                      keyPart, tmp_obj ) ;
                break ;
             }
-         case HA_KEYTYPE_USHORT_INT:
-         case HA_KEYTYPE_ULONG_INT:
-         case HA_KEYTYPE_ULONGLONG:
-         case HA_KEYTYPE_UINT24:
-            {
-               get_unsigned_key_range_obj( startKeyPtr,
-                                           startKeyPartMap,
-                                           find_flag,
-                                           endKeyPtr,
-                                           endKeyPartMap,
-                                           endFindFlag,
-                                           keyPart, tmp_obj ) ;
-               break ;
-            }
-         case HA_KEYTYPE_TEXT:
-         case HA_KEYTYPE_VARTEXT1:
-         case HA_KEYTYPE_VARTEXT2:
-            {
-               if ( !keyPart->field->binary() )
-               {
-                  get_text_key_range_obj( startKeyPtr,
-                                          startKeyPartMap,
-                                          find_flag,
-                                          endKeyPtr,
-                                          endKeyPartMap,
-                                          endFindFlag,
-                                          keyPart, tmp_obj ) ;
-               }//TODO: process the binary
-               break ;
-            }
-         case HA_KEYTYPE_FLOAT:
-         case HA_KEYTYPE_DOUBLE:
+         case MYSQL_TYPE_FLOAT:
+         case MYSQL_TYPE_DOUBLE:
             {
                get_float_key_range_obj( startKeyPtr,
                                         startKeyPartMap,
@@ -541,7 +571,31 @@ int build_match_obj_by_start_stop_key( uint keynr,
                                         keyPart, tmp_obj ) ;
                break ;
             }
-         case HA_KEYTYPE_NUM:
+         case MYSQL_TYPE_VARCHAR:
+         case MYSQL_TYPE_STRING:
+         case MYSQL_TYPE_VAR_STRING:
+         case MYSQL_TYPE_TINY_BLOB:
+         case MYSQL_TYPE_MEDIUM_BLOB:
+         case MYSQL_TYPE_LONG_BLOB:
+         case MYSQL_TYPE_BLOB:
+            {
+               if ( !keyPart->field->binary() )
+               {
+                  get_text_key_range_obj( startKeyPtr,
+                                          startKeyPartMap,
+                                          find_flag,
+                                          endKeyPtr,
+                                          endKeyPartMap,
+                                          endFindFlag,
+                                          keyPart, tmp_obj ) ;
+               }
+               else
+               {
+                  //TODO: process the binary
+                  rc = HA_ERR_UNSUPPORTED ;
+               }
+               break ;
+            }
          default:
             rc = HA_ERR_UNSUPPORTED ;
             break ;
