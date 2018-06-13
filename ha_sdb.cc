@@ -806,9 +806,17 @@ int ha_sdb::obj_to_row( bson::BSONObj &obj, uchar *buf )
       befield = obj.getField( (*field)->field_name ) ;
       if ( befield.eoo() || befield.isNull() )
       {
-         (*field)->set_null() ;
+         if ( (*field)->flags & NO_DEFAULT_VALUE_FLAG )
+         {
+            (*field)->set_null() ;
+         }
+         else
+         {
+            (*field)->set_default() ;
+         }
          continue ;
       }
+
       switch ( befield.type() )
       {
          case bson::NumberInt:
@@ -1199,7 +1207,12 @@ enum_alter_inplace_result ha_sdb::check_if_supported_inplace_alter(
       | Alter_inplace_info::ADD_PK_INDEX
       | Alter_inplace_info::DROP_PK_INDEX
       | Alter_inplace_info::ALTER_COLUMN_NOT_NULLABLE
-      | Alter_inplace_info::ALTER_COLUMN_NULLABLE ;
+      | Alter_inplace_info::ALTER_COLUMN_NULLABLE
+      | Alter_inplace_info::ADD_COLUMN
+      | Alter_inplace_info::DROP_COLUMN
+      | Alter_inplace_info::ALTER_STORED_COLUMN_ORDER
+      | Alter_inplace_info::ALTER_STORED_COLUMN_TYPE
+      | Alter_inplace_info::ALTER_COLUMN_DEFAULT;
 
    if ( ha_alter_info->handler_flags & ~inplace_online_operations )
    {
@@ -1350,7 +1363,13 @@ bool ha_sdb::inplace_alter_table( TABLE *altered_table,
       }
    }
    if ( ha_alter_info->handler_flags
-      & ~(inplace_online_addidx | inplace_online_dropidx) )
+      & ~(inplace_online_addidx
+          | inplace_online_dropidx
+          | Alter_inplace_info::ADD_COLUMN
+          | Alter_inplace_info::DROP_COLUMN
+          | Alter_inplace_info::ALTER_STORED_COLUMN_ORDER
+          | Alter_inplace_info::ALTER_STORED_COLUMN_TYPE
+          | Alter_inplace_info::ALTER_COLUMN_DEFAULT) )
    {
       my_printf_error( HA_ERR_UNSUPPORTED,
                        "Storage engine doesn't support the operation.",
