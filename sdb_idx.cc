@@ -23,6 +23,27 @@
 #include "sdb_err_code.h"
 #include "include/bson/bsonDecimal.h"
 
+#define ERASE_SPACES_END_OF_STRING(key_str, key_part) \
+{\
+    int key_str_start_pos = key_part->store_length - key_part->length;\
+    int key_str_len = strlen((char *)(key_str + key_str_start_pos));\
+    string temp_key_str = (char *)(key_str + key_str_start_pos);\
+    temp_key_str.erase(temp_key_str.find_last_not_of(" ") + 1);\
+    memset((char *)(key_str + key_str_start_pos), 0, key_str_len);\
+    strncpy((char *)(key_str + key_str_start_pos), temp_key_str.c_str(), strlen(temp_key_str.c_str()));\
+}
+
+#define LAST_OFFSET_OF_KEY(key_str, key_part, ch) \
+{\
+    int key_str_start_pos = key_part->store_length - key_part->length;\
+    int key_str_len = strlen((char *)(key_str + key_str_start_pos));\
+    ch = (char *)(key_str + key_str_start_pos + key_str_len);\
+}
+
+#define ADD_EXCLAMATION_MARK_END_OF_STRING(ch) { *ch = '!';}
+#define RM_EXCLAMATION_MARK_END_OF_STRING(ch) {*ch = '\0';}
+#define ADD_STAR_MARK_END_OF_STRING(ch) { *ch = '*';}
+
 BOOLEAN is_field_indexable( const Field *field )
 {
    switch( field->type() )
@@ -369,54 +390,21 @@ void get_text_key_val( const uchar *key_ptr,
                        key_part_map key_part_map_val,
                        const KEY_PART_INFO *key_part,
                        bson::BSONObjBuilder &obj_builder,
-                       const char *op_str )
+                       const char *op_str, bool add_excl_mark = FALSE)
 {
    if( key_part_map_val & 1  && ( !key_part->null_bit || 0 == *key_ptr )) 
    { 
-      /*if ( key_part->length >= SDB_FIELD_MAX_LEN )
-      {
-         // bson is not support so long filed,
-         // skip the condition
-         goto done ;
-      }*/
-
-      // TODO: Do we need to process the scene: end with space
-      /*if ( key_part->length > 0 && ' ' == str_field_buf[key_part->length-1] )
-      {
-         uint16 pos = key_part->length - 2 ;
-         char tmp[] = "( ){0,}$" ;
-         while( pos >= 0 && ' ' == str_field_buf[pos] )
-         {
-            --pos ;
-         }
-         ++pos ;
-         if ( 'e' == op_str[1] ) // $et
-         {
-            strcpy( str_field_buf + pos + 1, tmp ) ;
-            while( pos > 0 )
-            {
-               str_field_buf[pos] = str_field_buf[pos-1] ;
-               --pos ;
-            }
-            str_field_buf[0] = '^' ;
-            obj_builder.append( "$regex", str_field_buf ) ;
-            goto done ;
-         }
-         else if ( 'g' == op_str[1] ) // $gte
-         {
-            str_field_buf[pos] = 0 ;
-         }
-      }*/
+      int length = add_excl_mark?key_part->length + 1:key_part->length;
       obj_builder.appendStrWithNoTerminating( op_str,
-                                              (const char*)key_ptr
-                                                           + key_part->store_length
-                                                           - key_part->length,
-                                              key_part->length ) ;
+                                          (const char*)key_ptr +
+                                          key_part->store_length -
+                                          key_part->length,
+                                          length ) ;
    }
    return ;
 }
 
-void get_text_key_range_obj( const uchar *start_key_ptr,
+int get_text_key_range_obj( const uchar *start_key_ptr,
                              key_part_map start_key_part_map,
                              enum ha_rkey_function start_find_flag,
                              const uchar *end_key_ptr,
@@ -425,14 +413,58 @@ void get_text_key_range_obj( const uchar *start_key_ptr,
                              const KEY_PART_INFO *key_part,
                              bson::BSONObj &obj )
 {
-   bson::BSONObjBuilder obj_builder ;
-   /*if ( HA_READ_KEY_EXACT == start_find_flag )
-   {
-      get_text_key_val( start_key_ptr, start_key_part_map,
-                        key_part, obj_builder, "$et" ) ;
-   }
-   else*/
-   {
+    int rc = 0;
+    bson::BSONObjBuilder obj_builder ;
+    /*sdb is sensitive to spaces belong to end string, while mysql is not sensitive
+     so we return more results to the HA_READ_KEY_EXACT search.
+     'where a = "hello"'
+     euqal
+     'where a >= "hello" and a< "hello!";' ('!'=' ' + 1)
+    */
+    if ( HA_READ_KEY_EXACT == start_find_flag )
+    {
+        /*sdb is sensitive to spaces end of string, while mysql is not sensitive.
+         so we erase the spaces end of string which was filled by mysql optimize.
+         but we cannot influence the original key str, or the comp will failed in
+         handler::index_next_same*/
+        char *ch;
+        int temp_key_len = key_part->store_length + 1;  // +1 to add '!' or '*'
+        uchar *temp_key_ptr = (uchar *)malloc(temp_key_len);
+        if(NULL == temp_key_ptr)
+        {
+            rc = SDB_ERR_OOM ;
+            my_printf_error( rc,
+                             "failed to malloc mem, size:%d",
+                             MYF(0), key_part->store_length) ;
+            goto error ;
+        }
+        memset(temp_key_ptr, 0, temp_key_len);
+        memcpy(temp_key_ptr, start_key_ptr, key_part->store_length);
+        ERASE_SPACES_END_OF_STRING(temp_key_ptr, key_part);
+
+        /* Find next rec. after key-record */
+        if(HA_READ_AFTER_KEY == end_find_flag)
+        {
+            LAST_OFFSET_OF_KEY(temp_key_ptr, key_part, ch);
+            ADD_STAR_MARK_END_OF_STRING(ch);
+            get_text_key_val( temp_key_ptr, start_key_part_map,
+                          key_part, obj_builder, "$regex" ) ;
+        }
+        else
+        {
+            get_text_key_val( temp_key_ptr, start_key_part_map,
+                            key_part, obj_builder, "$gte" ) ;
+
+            LAST_OFFSET_OF_KEY(temp_key_ptr, key_part, ch);
+            ADD_EXCLAMATION_MARK_END_OF_STRING(ch);
+
+            get_text_key_val( temp_key_ptr, start_key_part_map,
+                            key_part, obj_builder, "$lt" , TRUE) ;
+        }
+        free(temp_key_ptr);
+    }
+    else
+    {
       get_text_key_val( start_key_ptr, start_key_part_map,
                         key_part, obj_builder, "$gte" ) ;
       if ( HA_READ_BEFORE_KEY == end_find_flag )
@@ -440,9 +472,13 @@ void get_text_key_range_obj( const uchar *start_key_ptr,
          get_text_key_val( end_key_ptr, end_key_part_map,
                            key_part, obj_builder, "$lte" ) ;
       }
-   }
+    }
 
-   obj = obj_builder.obj() ;
+    obj = obj_builder.obj() ;
+done:
+    return rc ;
+error:
+    goto done ;
 }
 
 void get_float_key_val( const uchar *key_ptr,
@@ -574,13 +610,17 @@ int build_match_obj_by_start_stop_key( uint keynr,
             {
                if ( !keyPart->field->binary() )
                {
-                  get_text_key_range_obj( startKeyPtr,
+                    rc = get_text_key_range_obj(startKeyPtr,
                                           startKeyPartMap,
                                           find_flag,
                                           endKeyPtr,
                                           endKeyPartMap,
                                           endFindFlag,
                                           keyPart, tmp_obj ) ;
+                    if(0 != rc)
+                    {
+                        goto error;
+                    }
                }
                else
                {
