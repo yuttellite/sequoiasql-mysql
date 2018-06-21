@@ -23,8 +23,8 @@
 #include <mysql/plugin.h>
 #include <include/client.hpp>
 #include <mysql/psi/mysql_file.h>
-#include <log.h>
 #include <time.h>
+#include "sdb_log.h"
 #include "sdb_conf.h"
 #include "sdb_cl.h"
 #include "sdb_conn.h"
@@ -62,6 +62,8 @@ static char *                 sdb_addr                = NULL ;
 static const char*            SDB_ADDR_DFT            = "localhost:11810" ;
 static my_bool                SDB_USE_PARTITION_DFT   = TRUE ;
 static my_bool                sdb_use_partition       = SDB_USE_PARTITION_DFT ;
+static my_bool                SDB_DEBUG_LOG_DFT       = FALSE ;
+static my_bool                sdb_debug_log           = SDB_DEBUG_LOG_DFT ;
 
 
 mysql_mutex_t sdb_mutex;
@@ -361,10 +363,10 @@ int ha_sdb::row_to_obj( uchar *buf,  bson::BSONObj & obj )
                   uint32 str_buf_size_new = 0 ;
                   if ( (*field)->data_length() >= SDB_FIELD_MAX_LEN )
                   {
-                     my_printf_error( ER_TOO_BIG_FIELDLENGTH,
+                     SDB_PRINT_ERROR( ER_TOO_BIG_FIELDLENGTH,
                                       ER(ER_TOO_BIG_FIELDLENGTH),
-                                      MYF(0), (*field)->field_name,
-                                      static_cast<ulong>(SDB_FIELD_MAX_LEN-1));
+                                      (*field)->field_name,
+                                      static_cast<ulong>(SDB_FIELD_MAX_LEN-1) ) ;
                      rc = -1 ;
                      goto error ;
                   }
@@ -1049,8 +1051,8 @@ void ha_sdb::position( const uchar *record )
       ref[SDB_ID_STR_LEN] = 0 ;
       if ( beField.type() != bson::jstOID )
       {
-         sql_print_error("Unexpected _id's type: %d ",
-				             beField.type() );
+         SDB_LOG_ERROR( "Unexpected _id's type: %d ",
+				            beField.type() );
       }
    }
    return ;
@@ -1352,9 +1354,8 @@ bool ha_sdb::inplace_alter_table( TABLE *altered_table,
    if ( ha_alter_info->handler_flags
       & ~(inplace_online_addidx | inplace_online_dropidx) )
    {
-      my_printf_error( HA_ERR_UNSUPPORTED,
-                       "Storage engine doesn't support the operation.",
-                       MYF(0) ) ;
+      SDB_PRINT_ERROR( HA_ERR_UNSUPPORTED,
+                       "Storage engine doesn't support the operation." ) ;
       rs = true ;
       goto error ;
    }
@@ -1521,9 +1522,9 @@ int ha_sdb::get_sharding_key( TABLE *form,
                if ( key_part_tmp == key_end_tmp )
                {
                   rc = SDB_INVALIDARG ;
-                  my_printf_error( rc,
+                  SDB_PRINT_ERROR( rc,
                                    "The unique index('%-.192s') must include the field: '%-.192s'",
-                                   MYF(0), key_info->name, key_part->field->field_name ) ;
+                                   key_info->name, key_part->field->field_name ) ;
                   goto error ;
                }
             }
@@ -1570,9 +1571,9 @@ int ha_sdb::get_cl_options( TABLE *form,
       rc = bson::fromjson( create_info->comment.str, comments ) ;
       if ( 0 != rc )
       {
-         my_printf_error( rc,
+         SDB_PRINT_ERROR( rc,
                           "Failed to parse comment: '%-.192s'",
-                          MYF(0), create_info->comment.str ) ;
+                          create_info->comment.str ) ;
          goto error ;
       }
 
@@ -1585,9 +1586,8 @@ int ha_sdb::get_cl_options( TABLE *form,
       if ( beOptions.type() != bson::EOO )
       {
          rc = SDB_INVALIDARG ;
-         my_printf_error( rc,
-                          "Failed to parse cl_options!",
-                          MYF(0) ) ;
+         SDB_PRINT_ERROR( rc,
+                          "Failed to parse cl_options!" ) ;
          goto error ;
       }
    }
@@ -1642,8 +1642,8 @@ int ha_sdb::create( const char *name, TABLE *form,
          str_field_len = (*field)->key_length() ;
          if ( str_field_len >= SDB_FIELD_MAX_LEN )
          {
-            my_printf_error(ER_TOO_BIG_FIELDLENGTH, ER(ER_TOO_BIG_FIELDLENGTH),
-                              MYF(0), (*field)->field_name,
+            SDB_PRINT_ERROR(ER_TOO_BIG_FIELDLENGTH, ER(ER_TOO_BIG_FIELDLENGTH),
+                              (*field)->field_name,
                               static_cast<ulong>(SDB_FIELD_MAX_LEN-1));
             rc = -1 ;
             goto error ; 
@@ -1785,7 +1785,6 @@ const Item *ha_sdb::cond_push( const Item *cond )
    {
       condition = sdbclient::_sdbStaticObject ;
    }
-
 done:
    return remain_cond;
 }
@@ -1944,11 +1943,11 @@ static int sdb_init_func(void *p)
    sdb_hton->rollback = sdb_rollback ;
    if( SDB_CONF_INST->parse_conn_addrs( sdb_addr ) )
    {
-      sql_print_error( "SequoiaDB: invalid value "
-            "sequoiadb_conn_addr=%s", sdb_addr ) ;
+      SDB_LOG_ERROR( "Invalid value sequoiadb_conn_addr=%s", sdb_addr ) ;
       return 1 ;
    }
    SDB_CONF_INST->set_use_partition( sdb_use_partition ) ;
+   SDB_CONF_INST->set_debug_log( sdb_debug_log ) ;
    return 0 ;
 }
 
@@ -1966,9 +1965,8 @@ static int sdb_conn_addrs_validate( THD * thd,
                                     void *save,
                                     struct st_mysql_value *value )
 {
-   my_printf_error( HA_ERR_UNSUPPORTED, 
-                    "'sequoiadb_conn_addr' must be modified by configuration file!",
-                    MYF(0) ) ;
+   SDB_PRINT_ERROR( HA_ERR_UNSUPPORTED, 
+                    "'sequoiadb_conn_addr' must be modified by configuration file!" ) ;
    return 1 ;
 }
 
@@ -1981,6 +1979,17 @@ static void sdb_use_partition_update( THD * thd,
       = *static_cast<const my_bool*>(value) ;
 
    SDB_CONF_INST->set_use_partition( use_partition ) ;
+}
+
+static void sdb_debug_log_update( THD * thd,
+                                  struct st_mysql_sys_var *var,
+                                  void *save,
+                                  const void *value )
+{
+   my_bool debug_log = *static_cast<my_bool*>(save)
+      = *static_cast<const my_bool*>(value) ;
+
+   SDB_CONF_INST->set_debug_log( debug_log ) ;
 }
 
 static struct st_mysql_storage_engine sdb_storage_engine=
@@ -1996,10 +2005,16 @@ static MYSQL_SYSVAR_BOOL( use_partition, sdb_use_partition,
                            "create partition table on sequoiadb",
                            NULL, sdb_use_partition_update,
                            SDB_USE_PARTITION_DFT ) ;
+static MYSQL_SYSVAR_BOOL( debug_log, sdb_debug_log,
+                           PLUGIN_VAR_BOOL|PLUGIN_VAR_MEMALLOC,
+                           "turn on debug log of sequoiadb",
+                           NULL, sdb_debug_log_update,
+                           SDB_DEBUG_LOG_DFT ) ;
 
 static struct st_mysql_sys_var *sdb_vars[]={
    MYSQL_SYSVAR(conn_addr),
    MYSQL_SYSVAR(use_partition),
+   MYSQL_SYSVAR(debug_log),
    NULL
 };
 
