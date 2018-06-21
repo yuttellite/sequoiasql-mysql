@@ -23,6 +23,6 @@ void sdb_log( loglevel lvl, const char *format, ... )
 
    va_start( args, format ) ;
    snprintf( format2, SDB_LOG_BUF_SIZE - 1, "SequoiaDB: %s", format ) ;
-   error_log_print( lvl, format, args ) ;
+   error_log_print( lvl, format2, args ) ;
    va_end( args ) ;
 }

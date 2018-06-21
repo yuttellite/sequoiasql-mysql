@@ -489,7 +489,7 @@ int ha_sdb::row_to_obj( uchar *buf,  bson::BSONObj & obj )
 
          default:
             {
-               my_error( ER_BAD_FIELD_ERROR, MYF(0),
+               SDB_PRINT_ERROR( ER_BAD_FIELD_ERROR, ER(ER_BAD_FIELD_ERROR),
                          (*field)->field_name, table_name ) ;
                rc = -1 ;
                goto error ;
@@ -1350,7 +1350,7 @@ bool ha_sdb::inplace_alter_table( TABLE *altered_table,
       rc = create_index( ha_alter_info ) ;
       if ( 0 != rc )
       {
-         my_error( ER_GET_ERRNO, MYF(0), rc );
+         SDB_PRINT_ERROR( ER_GET_ERRNO, ER(ER_GET_ERRNO), rc );
          rs = true ;
          goto error ;
       }
@@ -1360,7 +1360,7 @@ bool ha_sdb::inplace_alter_table( TABLE *altered_table,
       rc = drop_index( ha_alter_info ) ;
       if ( 0 != rc )
       {
-         my_error( ER_GET_ERRNO, MYF(0), rc );
+         SDB_PRINT_ERROR( ER_GET_ERRNO, ER(ER_GET_ERRNO), rc );
          rs = true ;
          goto error ;
       }

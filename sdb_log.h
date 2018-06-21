@@ -25,7 +25,7 @@
    do { \
       if ( SDB_CONF_INST->get_debug_log() ) \
       { \
-         sdb_log( ERROR_LEVEL, ##__VA_ARGS__ ) ; \
+         sdb_log( INFORMATION_LEVEL, format, ##__VA_ARGS__ ) ; \
       } \
    } while( 0 )
 
