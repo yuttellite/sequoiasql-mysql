@@ -1803,6 +1803,16 @@ const Item *ha_sdb::cond_push( const Item *cond )
    }
    else
    {
+      if ( NULL != ha_thd() )
+      {
+         SDB_LOG_DEBUG( "Condition can't be pushed down. db=[%s], sql=[%s]",
+                        ha_thd()->db().str, ha_thd()->query().str ) ;
+      }
+      else
+      {
+         SDB_LOG_DEBUG( "Condition can't be pushed down. "
+                        "db=[unknown], sql=[unknown]" ) ;
+      }
       condition = sdbclient::_sdbStaticObject ;
    }
 done:
