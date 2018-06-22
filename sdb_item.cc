@@ -159,7 +159,6 @@ error:
 int sdb_func_item::push( Item *cond_item )
 {
    int rc = SDB_ERR_OK ;
-   DBUG_ASSERT( !is_finished ) ;
 
    if ( is_finished )
    {
@@ -728,10 +727,8 @@ int sdb_func_isnull::to_bson( bson::BSONObj &obj )
 {
    int rc = SDB_ERR_OK ;
    Item *item_tmp = NULL ;
-   DBUG_ASSERT( is_finished ) ;
-   DBUG_ASSERT( !para_list.is_empty() ) ;
 
-   if ( !is_finished )
+   if ( !is_finished || para_list.elements != para_num_max )
    {
       rc = SDB_ERR_COND_INCOMPLETED ;
       goto error ;
@@ -770,17 +767,14 @@ int sdb_func_isnotnull::to_bson( bson::BSONObj &obj )
 {
    int rc = SDB_ERR_OK ;
    Item *item_tmp = NULL ;
-   DBUG_ASSERT( is_finished ) ;
-   DBUG_ASSERT( !para_list.is_empty() ) ;
 
-   if ( !is_finished )
+   if ( !is_finished || para_list.elements != para_num_max )
    {
       rc = SDB_ERR_COND_INCOMPLETED ;
       goto error ;
    }
 
    item_tmp = para_list.pop() ;
-   DBUG_ASSERT( para_list.is_empty() ) ;
    if ( Item::FIELD_ITEM != item_tmp->type() )
    {
       rc = SDB_ERR_COND_UNKOWN_ITEM ;
@@ -1095,11 +1089,8 @@ int sdb_func_cmp::to_bson( bson::BSONObj &obj )
    Item_field *item_field = NULL ;
    const char *name_tmp = NULL ;
    bson::BSONObj obj_tmp ;
-   DBUG_ASSERT( is_finished ) ;
-   DBUG_ASSERT( para_num_cur == para_num_max ) ;
-   DBUG_ASSERT( !para_list.is_empty() ) ;
 
-   if ( !is_finished )
+   if ( !is_finished || para_list.elements != para_num_max )
    {
       rc = SDB_ERR_COND_INCOMPLETED ;
       goto error ;
@@ -1115,11 +1106,8 @@ int sdb_func_cmp::to_bson( bson::BSONObj &obj )
       goto done ;
    }
 
-   while( para_num_cur )
+   while( !para_list.is_empty() )
    {
-      --para_num_cur ;
-
-      DBUG_ASSERT( !para_list.is_empty() ) ;
       item_tmp = para_list.pop() ;
       if ( Item::FIELD_ITEM != item_tmp->type() )
       {
@@ -1207,11 +1195,8 @@ int sdb_func_between::to_bson( bson::BSONObj &obj )
    Item *item_start = NULL, *item_end = NULL, *item_tmp = NULL ;
    bson::BSONObj obj_start, obj_end, obj_tmp ;
    bson::BSONArrayBuilder arr_builder ;
-   DBUG_ASSERT( is_finished ) ;
-   DBUG_ASSERT( para_num_cur == para_num_max ) ;
-   DBUG_ASSERT( !para_list.is_empty() ) ;
 
-   if ( !is_finished )
+   if ( !is_finished || para_list.elements != para_num_max )
    {
       rc = SDB_ERR_COND_INCOMPLETED ;
       goto error ;
@@ -1223,7 +1208,6 @@ int sdb_func_between::to_bson( bson::BSONObj &obj )
       goto error ;
    }
 
-   DBUG_ASSERT( !para_list.is_empty() ) ;
    item_tmp = para_list.pop() ;
    if ( Item::FIELD_ITEM != item_tmp->type() )
    {
@@ -1232,10 +1216,8 @@ int sdb_func_between::to_bson( bson::BSONObj &obj )
    }
    item_field = (Item_field *)item_tmp ;
 
-   DBUG_ASSERT( !para_list.is_empty() ) ;
    item_start = para_list.pop() ;
 
-   DBUG_ASSERT( !para_list.is_empty() ) ;
    item_end = para_list.pop() ;
 
    if ( negated )
@@ -1310,11 +1292,8 @@ int sdb_func_in::to_bson( bson::BSONObj &obj )
    Item *item_tmp = NULL ;
    bson::BSONArrayBuilder arr_builder ;
    bson::BSONObj obj_tmp ;
-   DBUG_ASSERT( is_finished ) ;
-   DBUG_ASSERT( para_num_cur == para_num_max ) ;
-   DBUG_ASSERT( !para_list.is_empty() ) ;
 
-   if ( !is_finished )
+   if ( !is_finished || para_list.elements != para_num_max )
    {
       rc = SDB_ERR_COND_INCOMPLETED ;
       goto error ;
@@ -1326,9 +1305,7 @@ int sdb_func_in::to_bson( bson::BSONObj &obj )
       goto error ;
    }
 
-   DBUG_ASSERT( !para_list.is_empty() ) ;
    item_tmp = para_list.pop() ;
-   --para_num_cur ;
    if ( Item::FIELD_ITEM != item_tmp->type() )
    {
       rc = SDB_ERR_COND_UNEXPECTED_ITEM ;
@@ -1336,11 +1313,9 @@ int sdb_func_in::to_bson( bson::BSONObj &obj )
    }
    item_field = (Item_field *)item_tmp ;
 
-   while( para_num_cur )
+   while( !para_list.is_empty() )
    {
-      DBUG_ASSERT( !para_list.is_empty() ) ;
       item_tmp = para_list.pop() ;
-      --para_num_cur ;
       rc = get_item_val( "", item_tmp,
                          item_field->field,
                          obj_tmp, &arr_builder ) ;

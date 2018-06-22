@@ -44,6 +44,10 @@ public:
 
    my_bool get_use_partition() ;
 
+   void set_debug_log( my_bool val ) ;
+
+   my_bool get_debug_log() ;
+
 private:
 
    sdb_conf() ;
@@ -59,6 +63,7 @@ private:
    int                           coord_num ;
    pthread_rwlock_t              addrs_mutex ;
    my_bool                       use_partition ;
+   my_bool                       debug_log ;
 } ;
 
 #define SDB_CONF_INST            sdb_conf::get_instance()
