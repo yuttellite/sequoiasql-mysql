@@ -21,28 +21,8 @@
 #include "sdb_cl.h"
 #include "sql_table.h"
 #include "sdb_err_code.h"
+#include "sdb_def.h"
 #include "include/bson/bsonDecimal.h"
-
-#define ERASE_SPACES_END_OF_STRING(key_str, key_part) \
-{\
-    int key_str_start_pos = key_part->store_length - key_part->length;\
-    int key_str_len = strlen((char *)(key_str + key_str_start_pos));\
-    string temp_key_str = (char *)(key_str + key_str_start_pos);\
-    temp_key_str.erase(temp_key_str.find_last_not_of(" ") + 1);\
-    memset((char *)(key_str + key_str_start_pos), 0, key_str_len);\
-    strncpy((char *)(key_str + key_str_start_pos), temp_key_str.c_str(), strlen(temp_key_str.c_str()));\
-}
-
-#define LAST_OFFSET_OF_KEY(key_str, key_part, ch) \
-{\
-    int key_str_start_pos = key_part->store_length - key_part->length;\
-    int key_str_len = strlen((char *)(key_str + key_str_start_pos));\
-    ch = (char *)(key_str + key_str_start_pos + key_str_len);\
-}
-
-#define ADD_EXCLAMATION_MARK_END_OF_STRING(ch) { *ch = '!';}
-#define RM_EXCLAMATION_MARK_END_OF_STRING(ch) {*ch = '\0';}
-#define ADD_STAR_MARK_END_OF_STRING(ch) { *ch = '*';}
 
 BOOLEAN is_field_indexable( const Field *field )
 {
@@ -390,21 +370,29 @@ void get_text_key_val( const uchar *key_ptr,
                        key_part_map key_part_map_val,
                        const KEY_PART_INFO *key_part,
                        bson::BSONObjBuilder &obj_builder,
-                       const char *op_str, bool add_excl_mark = FALSE)
+                       const char *op_str, int length = 0)
 {
-   if( key_part_map_val & 1  && ( !key_part->null_bit || 0 == *key_ptr )) 
-   { 
-      int length = add_excl_mark?key_part->length + 1:key_part->length;
-      obj_builder.appendStrWithNoTerminating( op_str,
-                                          (const char*)key_ptr +
-                                          key_part->store_length -
-                                          key_part->length,
-                                          length ) ;
+   if( key_part_map_val & 1  && ( !key_part->null_bit || 0 == *key_ptr || length)) 
+   {         
+      if(length)
+      {
+          obj_builder.appendStrWithNoTerminating(op_str, (const char*)key_ptr, length);
+      }
+      else
+      {
+          obj_builder.appendStrWithNoTerminating( op_str,
+                                              (const char*)key_ptr +
+                                              key_part->store_length -
+                                              key_part->length,
+                                              key_part->length );
+      }
    }
    return ;
 }
 
-int get_text_key_range_obj( const uchar *start_key_ptr,
+
+
+void get_text_key_range_obj( const uchar *start_key_ptr,
                              key_part_map start_key_part_map,
                              enum ha_rkey_function start_find_flag,
                              const uchar *end_key_ptr,
@@ -413,55 +401,48 @@ int get_text_key_range_obj( const uchar *start_key_ptr,
                              const KEY_PART_INFO *key_part,
                              bson::BSONObj &obj )
 {
-    int rc = 0;
     bson::BSONObjBuilder obj_builder ;
-    /*sdb is sensitive to spaces belong to end string, while mysql is not sensitive
-     so we return more results to the HA_READ_KEY_EXACT search.
-     'where a = "hello"'
-     euqal
-     'where a >= "hello" and a< "hello!";' ('!'=' ' + 1)
-    */
+    uchar key_field_str_buf[SDB_IDX_FIELD_SIZE_MAX] = {0};
     if ( HA_READ_KEY_EXACT == start_find_flag )
     {
-        /*sdb is sensitive to spaces end of string, while mysql is not sensitive.
-         so we erase the spaces end of string which was filled by mysql optimize.
-         but we cannot influence the original key str, or the comp will failed in
-         handler::index_next_same*/
-        char *ch;
-        int temp_key_len = key_part->store_length + 1;  // +1 to add '!' or '*'
-        uchar *temp_key_ptr = (uchar *)malloc(temp_key_len);
-        if(NULL == temp_key_ptr)
+        /*sdb is sensitive to spaces belong to end string, while mysql is not sensitive
+         so we return more results to the HA_READ_KEY_EXACT search.
+         'where a = "hello"'
+         euqal search in sdb with
+         '({a:{$regex:"^hello( ){0,}$"})'
+        */        
+        
+        /*we ignore the spaces end of key string which was filled by mysql.*/  
+        int key_start_pos = key_part->store_length - key_part->length;
+        int pos = key_part->store_length - 1;
+        while(pos >= key_start_pos && (' ' == start_key_ptr[pos] || '\0' == start_key_ptr[pos]))
         {
-            rc = SDB_ERR_OOM ;
-            my_printf_error( rc,
-                             "failed to malloc mem, size:%d",
-                             MYF(0), key_part->store_length) ;
-            goto error ;
+            pos--;
         }
-        memset(temp_key_ptr, 0, temp_key_len);
-        memcpy(temp_key_ptr, start_key_ptr, key_part->store_length);
-        ERASE_SPACES_END_OF_STRING(temp_key_ptr, key_part);
 
-        /* Find next rec. after key-record */
-        if(HA_READ_AFTER_KEY == end_find_flag)
+        pos++;
+        int length = pos - key_start_pos;
+        if(length >= SDB_IDX_FIELD_SIZE_MAX)
         {
-            LAST_OFFSET_OF_KEY(temp_key_ptr, key_part, ch);
-            ADD_STAR_MARK_END_OF_STRING(ch);
-            get_text_key_val( temp_key_ptr, start_key_part_map,
-                          key_part, obj_builder, "$regex" ) ;
+            return;
+        }
+        key_field_str_buf[0] = '^';
+        memcpy(key_field_str_buf + 1, start_key_ptr + key_start_pos, length);
+        
+        /* Find next rec. after key-record, or part key where a="abcdefg" (a(10), key(a(5)->"abcde")) */
+        if(HA_READ_AFTER_KEY == end_find_flag || key_part->key_part_flag & HA_PART_KEY_SEG)
+        {   
+            get_text_key_val(key_field_str_buf + 1, start_key_part_map,
+                          key_part, obj_builder, "$regex", length);
         }
         else
         {
-            get_text_key_val( temp_key_ptr, start_key_part_map,
-                            key_part, obj_builder, "$gte" ) ;
-
-            LAST_OFFSET_OF_KEY(temp_key_ptr, key_part, ch);
-            ADD_EXCLAMATION_MARK_END_OF_STRING(ch);
-
-            get_text_key_val( temp_key_ptr, start_key_part_map,
-                            key_part, obj_builder, "$lt" , TRUE) ;
-        }
-        free(temp_key_ptr);
+            /*replace {a:{$et:"hello"}} with {a:{$regex:"^hello( ){0,}$"}}*/
+            strncpy((char*)&key_field_str_buf[1 + length], "( ){0,}$", sizeof("( ){0,}$"));
+            length += strlen("^") + strlen("( ){0,}$");
+            get_text_key_val( key_field_str_buf, start_key_part_map,
+                            key_part, obj_builder, "$regex", length);
+        }        
     }
     else
     {
@@ -475,10 +456,6 @@ int get_text_key_range_obj( const uchar *start_key_ptr,
     }
 
     obj = obj_builder.obj() ;
-done:
-    return rc ;
-error:
-    goto done ;
 }
 
 void get_float_key_val( const uchar *key_ptr,
@@ -610,17 +587,13 @@ int build_match_obj_by_start_stop_key( uint keynr,
             {
                if ( !keyPart->field->binary() )
                {
-                    rc = get_text_key_range_obj(startKeyPtr,
+                    get_text_key_range_obj(startKeyPtr,
                                           startKeyPartMap,
                                           find_flag,
                                           endKeyPtr,
                                           endKeyPartMap,
                                           endFindFlag,
                                           keyPart, tmp_obj ) ;
-                    if(0 != rc)
-                    {
-                        goto error;
-                    }
                }
                else
                {
