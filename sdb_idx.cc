@@ -19,9 +19,10 @@
 
 #include "sdb_idx.h"
 #include "sdb_cl.h"
-#include "sql_table.h"
 #include "sdb_err_code.h"
 #include "sdb_def.h"
+#include "sdb_log.h"
+#include "sql_table.h"
 #include "include/bson/bsonDecimal.h"
 
 BOOLEAN is_field_indexable( const Field *field )
@@ -70,9 +71,9 @@ int sdb_create_index( const KEY *keyInfo, sdb_cl_auto_ptr cl )
       if ( !is_field_indexable( keyPart->field ) )
       {
          rc = HA_ERR_UNSUPPORTED ;
-         my_printf_error( rc,
+         SDB_PRINT_ERROR( rc,
                           "column '%-.192s' cannot be used in key specification.",
-                          MYF(0), keyPart->field->field_name ) ;
+                          keyPart->field->field_name ) ;
          goto error ;
       }
       // TODO: ASC or DESC

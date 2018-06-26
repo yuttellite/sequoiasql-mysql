@@ -134,3 +134,13 @@ my_bool sdb_conf::get_use_partition()
 {
    return use_partition ;
 }
+
+void sdb_conf::set_debug_log( my_bool val )
+{
+   debug_log = val ;
+}
+
+my_bool sdb_conf::get_debug_log()
+{
+   return debug_log ;
+}
