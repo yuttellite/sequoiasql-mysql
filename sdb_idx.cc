@@ -20,6 +20,7 @@
 #include "sdb_idx.h"
 #include "sdb_cl.h"
 #include "sdb_err_code.h"
+#include "sdb_def.h"
 #include "sdb_log.h"
 #include "sql_table.h"
 #include "include/bson/bsonDecimal.h"
@@ -370,52 +371,16 @@ void get_text_key_val( const uchar *key_ptr,
                        key_part_map key_part_map_val,
                        const KEY_PART_INFO *key_part,
                        bson::BSONObjBuilder &obj_builder,
-                       const char *op_str )
+                       const char *op_str, int length)
 {
-   if( key_part_map_val & 1  && ( !key_part->null_bit || 0 == *key_ptr )) 
-   { 
-      /*if ( key_part->length >= SDB_FIELD_MAX_LEN )
-      {
-         // bson is not support so long filed,
-         // skip the condition
-         goto done ;
-      }*/
-
-      // TODO: Do we need to process the scene: end with space
-      /*if ( key_part->length > 0 && ' ' == str_field_buf[key_part->length-1] )
-      {
-         uint16 pos = key_part->length - 2 ;
-         char tmp[] = "( ){0,}$" ;
-         while( pos >= 0 && ' ' == str_field_buf[pos] )
-         {
-            --pos ;
-         }
-         ++pos ;
-         if ( 'e' == op_str[1] ) // $et
-         {
-            strcpy( str_field_buf + pos + 1, tmp ) ;
-            while( pos > 0 )
-            {
-               str_field_buf[pos] = str_field_buf[pos-1] ;
-               --pos ;
-            }
-            str_field_buf[0] = '^' ;
-            obj_builder.append( "$regex", str_field_buf ) ;
-            goto done ;
-         }
-         else if ( 'g' == op_str[1] ) // $gte
-         {
-            str_field_buf[pos] = 0 ;
-         }
-      }*/
-      obj_builder.appendStrWithNoTerminating( op_str,
-                                              (const char*)key_ptr
-                                                           + key_part->store_length
-                                                           - key_part->length,
-                                              key_part->length ) ;
+   if( key_part_map_val & 1  && ( !key_part->null_bit || 0 == *key_ptr || length)) 
+   {
+      obj_builder.appendStrWithNoTerminating(op_str, (const char*)key_ptr, length);
    }
    return ;
 }
+
+
 
 void get_text_key_range_obj( const uchar *start_key_ptr,
                              key_part_map start_key_part_map,
@@ -427,19 +392,51 @@ void get_text_key_range_obj( const uchar *start_key_ptr,
                              bson::BSONObj &obj )
 {
    bson::BSONObjBuilder obj_builder ;
-   /*if ( HA_READ_KEY_EXACT == start_find_flag )
+   uchar key_field_str_buf[SDB_IDX_FIELD_SIZE_MAX] = {0};       
+
+   /*we ignore the spaces end of key string which was filled by mysql.*/  
+   int key_start_pos = key_part->store_length - key_part->length;
+   int pos = key_part->store_length - 1;
+   while(pos >= key_start_pos && (' ' == start_key_ptr[pos] || '\0' == start_key_ptr[pos]))
    {
-      get_text_key_val( start_key_ptr, start_key_part_map,
-                        key_part, obj_builder, "$et" ) ;
+      pos--;
    }
-   else*/
+
+   pos++;
+   int length = pos - key_start_pos;
+   if(length >= SDB_IDX_FIELD_SIZE_MAX)
    {
-      get_text_key_val( start_key_ptr, start_key_part_map,
-                        key_part, obj_builder, "$gte" ) ;
+      return;
+   }
+
+   // for exact match and exclude prefix-index.
+   if ( HA_READ_KEY_EXACT == start_find_flag
+      && !(key_part->key_part_flag & HA_PART_KEY_SEG && length))
+   {
+      //TODO: it is exact match if start_key_ptr is same as end_key_ptr.
+      /*sdb is sensitive to spaces belong to end string, while mysql is not sensitive
+      so we return more results to the HA_READ_KEY_EXACT search.
+      'where a = "hello"'
+      euqal search in sdb with
+      '({a:{$regex:"^hello( ){0,}$"})'
+      */ 
+      key_field_str_buf[0] = '^';
+      memcpy(key_field_str_buf + 1, start_key_ptr + key_start_pos, length);
+
+      /*replace {a:{$et:"hello"}} with {a:{$regex:"^hello( ){0,}$"}}*/
+      strncpy((char*)&key_field_str_buf[1 + length], "( ){0,}$", sizeof("( ){0,}$"));
+      length += strlen("^") + strlen("( ){0,}$");
+      get_text_key_val( key_field_str_buf, start_key_part_map,
+                         key_part, obj_builder, "$regex", length);
+   }
+   else/* Find next rec. after key-record, or part key where a="abcdefg" (a(10), key(a(5)->"abcde")) */
+   {
+      get_text_key_val( start_key_ptr + key_start_pos, start_key_part_map,
+                        key_part, obj_builder, "$gte", length ) ;
       if ( HA_READ_BEFORE_KEY == end_find_flag )
       {
-         get_text_key_val( end_key_ptr, end_key_part_map,
-                           key_part, obj_builder, "$lte" ) ;
+         get_text_key_val( end_key_ptr + key_part->store_length - key_part->length, end_key_part_map,
+                           key_part, obj_builder, "$lte", key_part->length );
       }
    }
 
@@ -575,7 +572,7 @@ int build_match_obj_by_start_stop_key( uint keynr,
             {
                if ( !keyPart->field->binary() )
                {
-                  get_text_key_range_obj( startKeyPtr,
+                    get_text_key_range_obj(startKeyPtr,
                                           startKeyPartMap,
                                           find_flag,
                                           endKeyPtr,
