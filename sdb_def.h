@@ -22,5 +22,6 @@
 #define CS_NAME_MAX_SIZE               255
 #define CL_NAME_MAX_SIZE               255
 
-#define SDB_IDX_FIELD_SIZE_MAX 1024
+#define SDB_IDX_FIELD_SIZE_MAX         1024
+
 #endif

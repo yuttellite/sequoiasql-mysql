@@ -370,22 +370,11 @@ void get_text_key_val( const uchar *key_ptr,
                        key_part_map key_part_map_val,
                        const KEY_PART_INFO *key_part,
                        bson::BSONObjBuilder &obj_builder,
-                       const char *op_str, int length = 0)
+                       const char *op_str, int length)
 {
    if( key_part_map_val & 1  && ( !key_part->null_bit || 0 == *key_ptr || length)) 
-   {         
-      if(length)
-      {
-          obj_builder.appendStrWithNoTerminating(op_str, (const char*)key_ptr, length);
-      }
-      else
-      {
-          obj_builder.appendStrWithNoTerminating( op_str,
-                                              (const char*)key_ptr +
-                                              key_part->store_length -
-                                              key_part->length,
-                                              key_part->length );
-      }
+   {
+      obj_builder.appendStrWithNoTerminating(op_str, (const char*)key_ptr, length);
    }
    return ;
 }
@@ -401,61 +390,56 @@ void get_text_key_range_obj( const uchar *start_key_ptr,
                              const KEY_PART_INFO *key_part,
                              bson::BSONObj &obj )
 {
-    bson::BSONObjBuilder obj_builder ;
-    uchar key_field_str_buf[SDB_IDX_FIELD_SIZE_MAX] = {0};
-    if ( HA_READ_KEY_EXACT == start_find_flag )
-    {
-        /*sdb is sensitive to spaces belong to end string, while mysql is not sensitive
-         so we return more results to the HA_READ_KEY_EXACT search.
-         'where a = "hello"'
-         euqal search in sdb with
-         '({a:{$regex:"^hello( ){0,}$"})'
-        */        
-        
-        /*we ignore the spaces end of key string which was filled by mysql.*/  
-        int key_start_pos = key_part->store_length - key_part->length;
-        int pos = key_part->store_length - 1;
-        while(pos >= key_start_pos && (' ' == start_key_ptr[pos] || '\0' == start_key_ptr[pos]))
-        {
-            pos--;
-        }
+   bson::BSONObjBuilder obj_builder ;
+   uchar key_field_str_buf[SDB_IDX_FIELD_SIZE_MAX] = {0};       
 
-        pos++;
-        int length = pos - key_start_pos;
-        if(length >= SDB_IDX_FIELD_SIZE_MAX)
-        {
-            return;
-        }
-        key_field_str_buf[0] = '^';
-        memcpy(key_field_str_buf + 1, start_key_ptr + key_start_pos, length);
-        
-        /* Find next rec. after key-record, or part key where a="abcdefg" (a(10), key(a(5)->"abcde")) */
-        if(HA_READ_AFTER_KEY == end_find_flag || key_part->key_part_flag & HA_PART_KEY_SEG)
-        {   
-            get_text_key_val(key_field_str_buf + 1, start_key_part_map,
-                          key_part, obj_builder, "$regex", length);
-        }
-        else
-        {
-            /*replace {a:{$et:"hello"}} with {a:{$regex:"^hello( ){0,}$"}}*/
-            strncpy((char*)&key_field_str_buf[1 + length], "( ){0,}$", sizeof("( ){0,}$"));
-            length += strlen("^") + strlen("( ){0,}$");
-            get_text_key_val( key_field_str_buf, start_key_part_map,
-                            key_part, obj_builder, "$regex", length);
-        }        
-    }
-    else
-    {
-      get_text_key_val( start_key_ptr, start_key_part_map,
-                        key_part, obj_builder, "$gte" ) ;
+   /*we ignore the spaces end of key string which was filled by mysql.*/  
+   int key_start_pos = key_part->store_length - key_part->length;
+   int pos = key_part->store_length - 1;
+   while(pos >= key_start_pos && (' ' == start_key_ptr[pos] || '\0' == start_key_ptr[pos]))
+   {
+      pos--;
+   }
+
+   pos++;
+   int length = pos - key_start_pos;
+   if(length >= SDB_IDX_FIELD_SIZE_MAX)
+   {
+      return;
+   }
+
+   // for exact match and exclude prefix-index.
+   if ( HA_READ_KEY_EXACT == start_find_flag
+      && !(key_part->key_part_flag & HA_PART_KEY_SEG && length))
+   {
+      //TODO: it is exact match if start_key_ptr is same as end_key_ptr.
+      /*sdb is sensitive to spaces belong to end string, while mysql is not sensitive
+      so we return more results to the HA_READ_KEY_EXACT search.
+      'where a = "hello"'
+      euqal search in sdb with
+      '({a:{$regex:"^hello( ){0,}$"})'
+      */ 
+      key_field_str_buf[0] = '^';
+      memcpy(key_field_str_buf + 1, start_key_ptr + key_start_pos, length);
+
+      /*replace {a:{$et:"hello"}} with {a:{$regex:"^hello( ){0,}$"}}*/
+      strncpy((char*)&key_field_str_buf[1 + length], "( ){0,}$", sizeof("( ){0,}$"));
+      length += strlen("^") + strlen("( ){0,}$");
+      get_text_key_val( key_field_str_buf, start_key_part_map,
+                         key_part, obj_builder, "$regex", length);
+   }
+   else/* Find next rec. after key-record, or part key where a="abcdefg" (a(10), key(a(5)->"abcde")) */
+   {
+      get_text_key_val( start_key_ptr + key_start_pos, start_key_part_map,
+                        key_part, obj_builder, "$gte", length ) ;
       if ( HA_READ_BEFORE_KEY == end_find_flag )
       {
-         get_text_key_val( end_key_ptr, end_key_part_map,
-                           key_part, obj_builder, "$lte" ) ;
+         get_text_key_val( end_key_ptr + key_part->store_length - key_part->length, end_key_part_map,
+                           key_part, obj_builder, "$lte", key_part->length );
       }
-    }
+   }
 
-    obj = obj_builder.obj() ;
+   obj = obj_builder.obj() ;
 }
 
 void get_float_key_val( const uchar *key_ptr,
