@@ -979,6 +979,10 @@ int ha_sdb::next_row( bson::BSONObj &obj,uchar *buf )
    rc = cl->next( obj ) ;
    if ( rc != 0 )
    {
+      if ( HA_ERR_END_OF_FILE == rc )
+      {
+         table->status = STATUS_NOT_FOUND ;
+      }
       goto error ;
    }
    rc = obj_to_row( obj, buf ) ;
@@ -1671,19 +1675,10 @@ int ha_sdb::create( const char *name, TABLE *form,
       }
    }
 
-   db_name[CS_NAME_MAX_SIZE] = 0 ;
-   strncpy( db_name, form->s->db.str, CS_NAME_MAX_SIZE+1 ) ;
-   if ( db_name[CS_NAME_MAX_SIZE] != 0 )
+   rc = sdb_parse_table_name( name, db_name, CS_NAME_MAX_SIZE+1,
+                              table_name, CL_NAME_MAX_SIZE+1 ) ;
+   if ( 0 != rc )
    {
-      rc = SDB_ERR_SIZE_OVF ;
-      goto error ;
-   }
-
-   table_name[CL_NAME_MAX_SIZE] = 0 ;
-   strncpy( table_name, form->s->table_name.str, CL_NAME_MAX_SIZE+1 ) ;
-   if ( table_name[CL_NAME_MAX_SIZE] != 0 )
-   {
-      rc = SDB_ERR_SIZE_OVF ;
       goto error ;
    }
 

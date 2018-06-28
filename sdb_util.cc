@@ -14,6 +14,7 @@
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
 #include "sdb_util.h"
+#include "mysqld.h"
 #include <string.h>
 
 int sdb_parse_table_name( const char * from,
@@ -37,6 +38,7 @@ int sdb_parse_table_name( const char * from,
    }
    memcpy( db_name, pBegin, len ) ;
    db_name[len] = 0 ;
+   my_casedn_str(system_charset_info, db_name);
 
    pBegin = pEnd + 1 ;
    pEnd = strchrnul( pBegin, '/' ) ;
@@ -48,6 +50,7 @@ int sdb_parse_table_name( const char * from,
    }
    memcpy( table_name, pBegin, len ) ;
    table_name[len] = 0 ;
+   my_casedn_str(system_charset_info, table_name);
 
 done:
    return rc ;
