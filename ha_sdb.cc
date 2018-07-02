@@ -990,6 +990,7 @@ int ha_sdb::next_row( bson::BSONObj &obj,uchar *buf )
    {
       goto error ;
    }
+   table->status = 0;
 done:
    return rc ;
 error:
