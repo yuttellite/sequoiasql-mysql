@@ -14,7 +14,7 @@
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
 #include "handler.h"
-#include "include/client.hpp"
+#include "client.hpp"
 #include "sdb_adaptor.h"
 #include "sdb_def.h"
 #include "sdb_cl_ptr.h"

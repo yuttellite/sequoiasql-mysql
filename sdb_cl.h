@@ -17,7 +17,7 @@
 #define SDB_CL__H
 
 #include <mysql/psi/mysql_thread.h>
-#include "include/client.hpp"
+#include "client.hpp"
 #include "sdb_def.h"
 #include "sdb_conn_ptr.h"
 

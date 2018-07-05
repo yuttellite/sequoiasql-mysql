@@ -17,7 +17,7 @@
 #define SDB_IDX__H
 
 #include "sql_class.h"
-#include "include/client.hpp"
+#include "client.hpp"
 #include "sdb_cl_ptr.h"
 
 int sdb_create_index( const KEY *keyInfo, sdb_cl_auto_ptr cl ) ;

@@ -21,7 +21,7 @@
 #include "sql_table.h"
 #include "ha_sdb.h"
 #include <mysql/plugin.h>
-#include <include/client.hpp>
+#include <client.hpp>
 #include <mysql/psi/mysql_file.h>
 #include <time.h>
 #include "sdb_log.h"

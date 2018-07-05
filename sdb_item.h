@@ -16,7 +16,7 @@
 #ifndef SDB_ITEM__H
 #define SDB_ITEM__H
 
-#include <include/client.hpp>
+#include <client.hpp>
 #include <item.h>
 #include <item_cmpfunc.h>
 #include "sdb_err_code.h"
