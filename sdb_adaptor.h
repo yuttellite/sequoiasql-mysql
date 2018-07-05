@@ -20,7 +20,7 @@
 #include <mysql/psi/mysql_thread.h>
 #include <my_global.h>
 #include <atomic_class.h>
-#include "include/client.hpp"
+#include "client.hpp"
 #include "sdb_conn_ptr.h"
 #include "sdb_cl_ptr.h"
 #include "sdb_util.h"

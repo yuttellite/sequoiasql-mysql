@@ -23,7 +23,7 @@
 #include "sdb_def.h"
 #include "sdb_log.h"
 #include "sql_table.h"
-#include "include/bson/bsonDecimal.h"
+#include "bson/bsonDecimal.h"
 
 BOOLEAN is_field_indexable( const Field *field )
 {

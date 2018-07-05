@@ -17,7 +17,7 @@
    #define MYSQL_SERVER
 #endif
 
-#include "include/client.hpp"
+#include "client.hpp"
 #include "sql_class.h"
 #include "sdb_conn.h"
 #include "sdb_conn_ptr.h"
