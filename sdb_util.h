@@ -23,6 +23,9 @@
 int sdb_parse_table_name( const char * from,
                           char *db_name, int db_name_size,
                           char *table_name, int table_name_size ) ;
+
+int sdb_get_db_name_from_path( const char * path,
+                               char *db_name, int db_name_size ) ;
 class sdb_lock_time_out
 {
 public:

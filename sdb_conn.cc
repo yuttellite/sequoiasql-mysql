@@ -240,6 +240,25 @@ error:
    goto done ;
 }
 
+int sdb_conn::drop_cs( char *cs_name )
+{
+   int rc = SDB_ERR_OK ;
+   rc = connection.dropCollectionSpace( cs_name ) ;
+   if( rc != SDB_ERR_OK )
+   {
+      goto error ;
+   }
+done:
+   return rc ;
+error:
+   if ( IS_SDB_NET_ERR( rc ) )
+   {
+      connect() ;
+   }
+   convert_sdb_code( rc ) ;
+   goto done ;
+}
+
 void sdb_conn::clear_cl( char *cs_name, char *cl_name )
 {
    std::map<std::string, sdb_cl_auto_ptr>::iterator iter ;

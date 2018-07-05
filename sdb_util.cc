@@ -14,6 +14,7 @@
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
 #include "sdb_util.h"
+#include "sdb_err_code.h"
 #include "mysqld.h"
 #include <string.h>
 
@@ -57,3 +58,39 @@ done:
 error:
    goto done ;
 }
+
+int sdb_get_db_name_from_path( const char * path,
+                               char *db_name, int db_name_size )
+{
+   int rc = SDB_ERR_OK, len = 0 ;
+   const char *pBegin=NULL, *pEnd=NULL ;
+   if ( NULL == path )
+   {
+      rc = SDB_ERR_INVALID_ARG ;
+      goto error ;
+   }
+
+   pBegin = path + 2 ; //skip "./"
+   pEnd = strrchr( pBegin, '/' ) ;
+   if ( pEnd <= pBegin )
+   {
+      rc = SDB_ERR_INVALID_ARG ;
+      goto error ;
+   }
+
+   len = pEnd - pBegin ;
+   if ( len >= db_name_size )
+   {
+      rc = SDB_ERR_INVALID_ARG ;
+      goto error ;
+   }
+   memcpy( db_name, pBegin, len ) ;
+   db_name[len] = 0 ;
+   my_casedn_str(system_charset_info, db_name);
+   
+done:
+   return rc ;
+error:
+   goto done ;
+}
+

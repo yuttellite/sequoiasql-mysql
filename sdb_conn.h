@@ -56,6 +56,8 @@ public:
                   sdb_cl_auto_ptr &cl_ptr,
                   const bson::BSONObj &options = sdbclient::_sdbStaticObject ) ;
 
+   int drop_cs( char *cs_name ) ;
+
    void clear_cl( char *cs_name, char *cl_name ) ;
 
    void clear_all_cl() ;
