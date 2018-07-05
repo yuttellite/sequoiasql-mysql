@@ -390,17 +390,17 @@ int sdb_func_item::get_item_val( const char *field_name,
 
    if ( Item::NULL_ITEM == item_val->type() )
    {
-      // "$isnull" appear in array is not support now
+      // "$exists" appear in array is not support now
       if ( NULL == arr_builder )
       {
          if ( type() == Item_func::EQ_FUNC )
          {
-            obj = BSON( "$isnull" << 1 ) ;
+            obj = BSON( "$exists" << 0 ) ;
             goto done ;
          }
          else if ( type() == Item_func::NE_FUNC )
          {
-            obj = BSON( "$isnull" << 0 ) ;
+            obj = BSON( "$exists" << 1 ) ;
             goto done ;
          }
       }
@@ -747,7 +747,7 @@ int sdb_func_isnull::to_bson( bson::BSONObj &obj )
       goto error ;
    }
    obj = BSON( ((Item_field *)item_tmp)->field_name
-                << BSON( this->name() << 1 ) ) ;
+                << BSON( this->name() << 0 ) ) ;
 
 done:
    return rc ;
@@ -781,7 +781,7 @@ int sdb_func_isnotnull::to_bson( bson::BSONObj &obj )
       goto error ;
    }
    obj = BSON( ((Item_field *)item_tmp)->field_name
-               << BSON( this->name() << 0 ) ) ;
+               << BSON( this->name() << 1 ) ) ;
 
 done:
    return rc ;

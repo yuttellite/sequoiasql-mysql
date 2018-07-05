@@ -256,7 +256,8 @@ private:
 
    int obj_to_row( bson::BSONObj &obj, uchar *buf ) ;
 
-   int row_to_obj( uchar *buf, bson::BSONObj &obj ) ;
+   int row_to_obj( uchar *buf, bson::BSONObj &obj,
+                   bool output_null, bson::BSONObj &null_obj ) ;
 
    int next_row( bson::BSONObj &obj, uchar *buf ) ;
 

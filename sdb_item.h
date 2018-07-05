@@ -142,7 +142,7 @@ public:
    ~sdb_func_isnull() ;
 
    virtual int to_bson( bson::BSONObj &obj ) ;
-   virtual const char *name() { return "$isnull" ; }
+   virtual const char *name() { return "$exists" ; }
    virtual Item_func::Functype type() { return Item_func::ISNULL_FUNC ; }
 };
 
@@ -153,7 +153,7 @@ public:
    ~sdb_func_isnotnull() ;
 
    virtual int to_bson( bson::BSONObj &obj ) ;
-   virtual const char *name() { return "$isnull" ; }
+   virtual const char *name() { return "$exists" ; }
    virtual Item_func::Functype type() { return Item_func::ISNOTNULL_FUNC ; }
 };
 

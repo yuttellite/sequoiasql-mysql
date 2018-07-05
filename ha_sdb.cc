@@ -282,10 +282,12 @@ int ha_sdb::close(void)
    return 0;
 }
 
-int ha_sdb::row_to_obj( uchar *buf,  bson::BSONObj & obj )
+int ha_sdb::row_to_obj( uchar *buf,  bson::BSONObj & obj,
+                        bool output_null, bson::BSONObj &null_obj )
 {
    int rc = 0 ;
    bson::BSONObjBuilder obj_builder ;
+   bson::BSONObjBuilder null_obj_builder ;
 
    my_bitmap_map *org_bitmap= dbug_tmp_use_all_columns(table, table->read_set) ;
    if ( buf != table->record[0] )
@@ -295,9 +297,13 @@ int ha_sdb::row_to_obj( uchar *buf,  bson::BSONObj & obj )
 
    for( Field **field = table->field ; *field ; field++ )
    {
-      //skip the null field
       if( (*field)->is_null() )
       {
+         //get the null field
+         if( output_null )
+         {
+            null_obj_builder.append((*field)->field_name, "" ) ;
+         }
          continue ;
       }
 
@@ -499,6 +505,7 @@ int ha_sdb::row_to_obj( uchar *buf,  bson::BSONObj & obj )
       
    }
    obj = obj_builder.obj() ;
+   null_obj = null_obj_builder.obj() ;
 
 done:
    if ( buf != table->record[0] )
@@ -514,11 +521,11 @@ error:
 int ha_sdb::write_row(uchar *buf)
 {
    int rc = 0 ;
-   bson::BSONObj obj ;
+   bson::BSONObj obj, tmp_obj ;
    ha_statistic_increment( &SSV::ha_write_count ) ;
    check_thread() ;
 
-   rc = row_to_obj( buf, obj ) ;
+   rc = row_to_obj( buf, obj, FALSE, tmp_obj ) ;
    if ( rc != 0 )
    {
       goto error ;
@@ -540,18 +547,18 @@ error:
 int ha_sdb::update_row( const uchar *old_data, uchar *new_data )
 {
    int rc = 0 ;
-   bson::BSONObj old_obj, new_obj, rule_obj ;
+   bson::BSONObj old_obj, new_obj, rule_obj, null_obj ;
    check_thread() ;
 
    ha_statistic_increment( &SSV::ha_update_count ) ;
 
-   rc = row_to_obj( new_data, new_obj ) ;
+   rc = row_to_obj( new_data, new_obj, TRUE, null_obj ) ;
    if ( rc != 0 )
    {
       goto error ;
    }
 
-   rule_obj = BSON( "$set" << new_obj ) ;
+   rule_obj = BSON( "$set" << new_obj << "$unset" << null_obj ) ;
    rc = cl->update( rule_obj, cur_rec ) ;
    if ( rc != 0 )
    {
@@ -1949,6 +1956,47 @@ error:
    goto done ;
 }
 
+static
+void
+sdb_drop_database(
+   handlerton* hton,
+   char*    path)
+{
+   int rc = 0 ;
+   char db_name[CS_NAME_MAX_SIZE + 1] = {0} ;
+   sdb_conn_auto_ptr connection ;
+   THD *thd = current_thd ;
+   if ( NULL == thd )
+   {
+      goto error ;
+   }
+
+   rc = SDB_CONN_MGR_INST->get_sdb_conn( thd->thread_id(),
+                                         connection ) ;
+   if ( rc != 0 )
+   {
+      goto error ;
+   }
+
+   rc = sdb_get_db_name_from_path( path, db_name, CS_NAME_MAX_SIZE+1 ) ;
+   if ( rc != 0 )
+   {
+      goto error ;
+   }
+
+   rc = connection->drop_cs( db_name ) ;
+   if ( rc != 0 )
+   {
+      goto error ;
+   }
+
+done:
+   return ;
+error:
+   goto done ;
+}
+
+
 static int sdb_init_func(void *p)
 {
    handlerton *sdb_hton ;
@@ -1967,6 +2015,7 @@ static int sdb_init_func(void *p)
                      | HTON_NO_PARTITION ) ;
    sdb_hton->commit = sdb_commit ;
    sdb_hton->rollback = sdb_rollback ;
+   sdb_hton->drop_database = sdb_drop_database ;
    if( SDB_CONF_INST->parse_conn_addrs( sdb_addr ) )
    {
       SDB_LOG_ERROR( "Invalid value sequoiadb_conn_addr=%s", sdb_addr ) ;
