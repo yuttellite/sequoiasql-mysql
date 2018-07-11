@@ -25,6 +25,59 @@
 #include "sql_table.h"
 #include "bson/bsonDecimal.h"
 
+static bson::BSONObj empty_obj ;
+
+enum sdb_search_match_mode
+{
+   SDB_ET = 0,
+   SDB_GT = 1,
+   SDB_GTE = 2,
+   SDB_LT = 3,
+   SDB_LTE = 4,
+   SDB_UNSUPP = -1,
+};
+
+int get_key_direction(sdb_search_match_mode mode)
+{
+	switch (mode)
+   {
+   case SDB_ET:
+	case SDB_GT:
+   case SDB_GTE:
+		return 1;
+	case SDB_LT:
+	case SDB_LTE:
+		return -1;
+   default:
+      return 1;
+   }
+   return 1;
+}
+
+sdb_search_match_mode conver_search_mode_to_sdb_mode(ha_rkey_function find_flag)
+{
+	switch (find_flag)
+   {
+	case HA_READ_KEY_EXACT:
+      return SDB_ET;
+	case HA_READ_KEY_OR_NEXT:
+      return SDB_GTE;
+	case HA_READ_AFTER_KEY:		
+		return SDB_GT;
+	case HA_READ_BEFORE_KEY:
+      return SDB_LT;
+	case HA_READ_KEY_OR_PREV:
+	case HA_READ_PREFIX_LAST:
+	case HA_READ_PREFIX_LAST_OR_PREV:
+		return SDB_LTE;
+   case HA_READ_PREFIX:
+   default:
+      return SDB_UNSUPP;
+   }
+   return SDB_UNSUPP;
+}
+
+
 BOOLEAN is_field_indexable( const Field *field )
 {
    switch( field->type() )
@@ -45,9 +98,9 @@ BOOLEAN is_field_indexable( const Field *field )
       case MYSQL_TYPE_LONG_BLOB:
       case MYSQL_TYPE_BLOB:
          {
-            if ( !field->binary() ) 
+            if ( !field->binary() )
                return TRUE ;
-            else 
+            else
                return FALSE ;
          }
       default:
@@ -127,7 +180,7 @@ const char * sdb_get_idx_name( KEY * key_info )
    return NULL ;
 }
 
-int sdb_get_idx_order( KEY * key_info, bson::BSONObj &order )
+int sdb_get_idx_order( KEY * key_info, bson::BSONObj &order, int order_direction)
 {
    int rc = SDB_ERR_OK ;
    const KEY_PART_INFO *keyPart ;
@@ -142,7 +195,7 @@ int sdb_get_idx_order( KEY * key_info, bson::BSONObj &order )
    keyEnd = keyPart + key_info->user_defined_key_parts ;
    for( ; keyPart != keyEnd ; ++keyPart )
    {
-      obj_builder.append( keyPart->field->field_name, 1 ) ;
+      obj_builder.append( keyPart->field->field_name, order_direction) ;
    }
    order = obj_builder.obj() ;
 
@@ -159,7 +212,7 @@ typedef union _sdb_key_common_type
    uint8    uint8_val ;
    int16    int16_val ;
    uint16   uint16_val ;
-   int32    int24_val ; 
+   int32    int24_val ;
    uint32   uint24_val ;
    int32    int32_val ;
    uint32   uint32_val ;
@@ -175,16 +228,16 @@ void get_unsigned_key_val( const uchar *key_ptr,
 {
    sdb_key_common_type val_tmp ;
    val_tmp.uint64_val = 0 ;
-   if ( key_part->length > sizeof( val_tmp ) )
+   if (NULL == key_ptr || key_part->length > sizeof( val_tmp ) )
    {
       goto done ;
    }
 
-   if( key_part_map_val & 1  && ( !key_part->null_bit || 0 == *key_ptr )) 
-   { 
+   if( key_part_map_val & 1  && ( !key_part->null_bit || 0 == *key_ptr ))
+   {
       memcpy( &(val_tmp.sz_data[0]),
-              key_ptr+key_part->store_length-key_part->length, 
-              key_part->length ); 
+              key_ptr+key_part->store_length-key_part->length,
+              key_part->length );
       switch( key_part->length )
       {
          case 1:
@@ -228,49 +281,24 @@ done:
    return ;
 }
 
-void get_unsigned_key_range_obj( const uchar *start_key_ptr,
-                                 key_part_map start_key_part_map,
-                                 enum ha_rkey_function start_find_flag,
-                                 const uchar *end_key_ptr,
-                                 key_part_map end_key_part_map,
-                                 enum ha_rkey_function end_find_flag,
-                                 const KEY_PART_INFO *key_part,
-                                 bson::BSONObj &obj )
-{
-   bson::BSONObjBuilder obj_builder ;
-   if ( HA_READ_KEY_EXACT == start_find_flag )
-   {
-      get_unsigned_key_val( start_key_ptr, start_key_part_map,
-                            key_part, obj_builder, "$et" ) ;
-   }
-   else
-   {
-      get_unsigned_key_val( start_key_ptr, start_key_part_map,
-                            key_part, obj_builder, "$gte" ) ;
-      get_unsigned_key_val( end_key_ptr, end_key_part_map,
-                            key_part, obj_builder, "$lte" ) ;
-   }
-   obj = obj_builder.obj() ;
-}
-
 void get_signed_key_val( const uchar *key_ptr,
                          key_part_map key_part_map_val,
                          const KEY_PART_INFO *key_part,
                          bson::BSONObjBuilder &obj_builder,
-                         const char *op_str )
+                         const char *op_str)
 {
    sdb_key_common_type val_tmp ;
    val_tmp.uint64_val = 0 ;
-   if ( key_part->length > sizeof( val_tmp ) )
+   if (NULL == key_ptr || key_part->length > sizeof( val_tmp ) )
    {
       goto done ;
    }
 
-   if( key_part_map_val & 1  && ( !key_part->null_bit || 0 == *key_ptr )) 
-   { 
+   if( key_part_map_val & 1  && ( !key_part->null_bit || 0 == *key_ptr ))
+   {
       memcpy( &(val_tmp.sz_data[0]),
-              key_ptr+key_part->store_length-key_part->length, 
-              key_part->length ); 
+              key_ptr+key_part->store_length-key_part->length,
+              key_part->length );
       switch( key_part->length )
       {
          case 1:
@@ -311,93 +339,72 @@ done:
    return ;
 }
 
-void get_signed_key_range_obj( const uchar *start_key_ptr,
-                               key_part_map start_key_part_map,
-                               enum ha_rkey_function start_find_flag,
-                               const uchar *end_key_ptr,
-                               key_part_map end_key_part_map,
-                               enum ha_rkey_function end_find_flag,
-                               const KEY_PART_INFO *key_part,
-                               bson::BSONObj &obj )
+void get_int_key_obj( const uchar *key_ptr,
+                            key_part_map key_part_map,
+                            const KEY_PART_INFO *key_part,
+                            bson::BSONObj &obj,
+                            const char *op_str)
 {
    bson::BSONObjBuilder obj_builder ;
-   if ( HA_READ_KEY_EXACT == start_find_flag )
-   {
-      get_signed_key_val( start_key_ptr, start_key_part_map,
-                          key_part, obj_builder, "$et" ) ;
-   }
-   else
-   {
-      get_signed_key_val( start_key_ptr, start_key_part_map,
-                          key_part, obj_builder, "$gte" ) ;
-      get_signed_key_val( end_key_ptr, end_key_part_map,
-                          key_part, obj_builder, "$lte" ) ;
-   }
-   obj = obj_builder.obj() ;
-}
-
-void get_int_key_range_obj( const uchar *start_key_ptr,
-                            key_part_map start_key_part_map,
-                            enum ha_rkey_function start_find_flag,
-                            const uchar *end_key_ptr,
-                            key_part_map end_key_part_map,
-                            enum ha_rkey_function end_find_flag,
-                            const KEY_PART_INFO *key_part,
-                            bson::BSONObj &obj )
-{
    if ( !((Field_num *)(key_part->field))->unsigned_flag )
    {
-      get_signed_key_range_obj( start_key_ptr,
-                                start_key_part_map,
-                                start_find_flag,
-                                end_key_ptr,
-                                end_key_part_map,
-                                end_find_flag,
-                                key_part, obj ) ;
+      get_signed_key_val( key_ptr,
+                          key_part_map,
+                          key_part,
+                          obj_builder,
+                          op_str) ;
    }
    else
    {
-      get_unsigned_key_range_obj( start_key_ptr,
-                                  start_key_part_map,
-                                  start_find_flag,
-                                  end_key_ptr,
-                                  end_key_part_map,
-                                  end_find_flag,
-                                  key_part, obj ) ;
+      get_unsigned_key_val( key_ptr,
+                            key_part_map,
+                            key_part,
+                            obj_builder,
+                            op_str) ;
    }
+   obj = obj_builder.obj();
 }
 
 void get_text_key_val( const uchar *key_ptr,
                        key_part_map key_part_map_val,
-                       const KEY_PART_INFO *key_part,
                        bson::BSONObjBuilder &obj_builder,
-                       const char *op_str, int length)
+                       const char *op_str,
+                       bool is_null,
+                       int length)
 {
-   if( key_part_map_val & 1  && ( !key_part->null_bit || 0 == *key_ptr || length)) 
+   if( key_part_map_val & 1  && !is_null)
    {
       obj_builder.appendStrWithNoTerminating(op_str, (const char*)key_ptr, length);
    }
    return ;
 }
 
-
-
-void get_text_key_range_obj( const uchar *start_key_ptr,
-                             key_part_map start_key_part_map,
-                             enum ha_rkey_function start_find_flag,
-                             const uchar *end_key_ptr,
-                             key_part_map end_key_part_map,
-                             enum ha_rkey_function end_find_flag,
-                             const KEY_PART_INFO *key_part,
-                             bson::BSONObj &obj )
+void get_text_key_obj( const uchar *key_ptr,
+                            key_part_map key_part_map,
+                            const KEY_PART_INFO *key_part,
+                            bson::BSONObj &obj,
+                            const char *op_str)
 {
    bson::BSONObjBuilder obj_builder ;
-   uchar key_field_str_buf[SDB_IDX_FIELD_SIZE_MAX] = {0};       
+   bool is_null;
+   uchar key_field_str_buf[SDB_IDX_FIELD_SIZE_MAX] = {0};
 
-   /*we ignore the spaces end of key string which was filled by mysql.*/  
+   /*we ignore the spaces end of key string which was filled by mysql.*/
    int key_start_pos = key_part->store_length - key_part->length;
    int pos = key_part->store_length - 1;
-   while(pos >= key_start_pos && (' ' == start_key_ptr[pos] || '\0' == start_key_ptr[pos]))
+
+   if(NULL == key_ptr)
+   {
+      return;
+   }
+
+   is_null = (key_part->null_bit && 0 != *key_ptr) ? true : false;
+   if(is_null)
+   {
+      return;
+   }
+
+   while(pos >= key_start_pos && (' ' == key_ptr[pos] || '\0' == key_ptr[pos]))
    {
       pos--;
    }
@@ -409,37 +416,38 @@ void get_text_key_range_obj( const uchar *start_key_ptr,
       return;
    }
 
-   // for exact match and exclude prefix-index.
-   if ( HA_READ_KEY_EXACT == start_find_flag
-      && !(key_part->key_part_flag & HA_PART_KEY_SEG && length))
+   if(0 == strcmp("$et", op_str))
    {
-      //TODO: it is exact match if start_key_ptr is same as end_key_ptr.
-      /*sdb is sensitive to spaces belong to end string, while mysql is not sensitive
-      so we return more results to the HA_READ_KEY_EXACT search.
-      'where a = "hello"'
-      euqal search in sdb with
-      '({a:{$regex:"^hello( ){0,}$"})'
-      */ 
-      key_field_str_buf[0] = '^';
-      memcpy(key_field_str_buf + 1, start_key_ptr + key_start_pos, length);
-
-      /*replace {a:{$et:"hello"}} with {a:{$regex:"^hello( ){0,}$"}}*/
-      strncpy((char*)&key_field_str_buf[1 + length], "( ){0,}$", sizeof("( ){0,}$"));
-      length += strlen("^") + strlen("( ){0,}$");
-      get_text_key_val( key_field_str_buf, start_key_part_map,
-                         key_part, obj_builder, "$regex", length);
-   }
-   else/* Find next rec. after key-record, or part key where a="abcdefg" (a(10), key(a(5)->"abcde")) */
-   {
-      get_text_key_val( start_key_ptr + key_start_pos, start_key_part_map,
-                        key_part, obj_builder, "$gte", length ) ;
-      if ( HA_READ_BEFORE_KEY == end_find_flag )
+      if(!(key_part->key_part_flag & HA_PART_KEY_SEG && length))
       {
-         get_text_key_val( end_key_ptr + key_part->store_length - key_part->length, end_key_part_map,
-                           key_part, obj_builder, "$lte", key_part->length );
+         //TODO: it is exact match if start_key_ptr is same as end_key_ptr.
+         /*sdb is sensitive to spaces belong to end string, while mysql is not sensitive
+         so we return more results to the HA_READ_KEY_EXACT search.
+         'where a = "hello"'
+         euqal search in sdb with
+         '({a:{$regex:"^hello( ){0,}$"})'
+         */
+         key_field_str_buf[0] = '^';
+         memcpy(key_field_str_buf + 1, key_ptr + key_start_pos, length);
+
+         /*replace {a:{$et:"hello"}} with {a:{$regex:"^hello( ){0,}$"}}*/
+         strncpy((char*)&key_field_str_buf[1 + length], "( ){0,}$", sizeof("( ){0,}$"));
+         length += strlen("^") + strlen("( ){0,}$");
+         get_text_key_val( key_field_str_buf, key_part_map,
+                           obj_builder, "$regex", is_null, length);
+      }
+      /* Find next rec. after key-record, or part key where a="abcdefg" (a(10), key(a(5)->"abcde")) */
+      else
+      {
+         get_text_key_val( key_ptr + key_start_pos, key_part_map,
+                           obj_builder, "$gte", is_null, length ) ;
       }
    }
-
+   else
+   {
+      get_text_key_val( key_ptr + key_start_pos, key_part_map,
+                        obj_builder, op_str, is_null, length ) ;
+   }
    obj = obj_builder.obj() ;
 }
 
@@ -449,8 +457,13 @@ void get_float_key_val( const uchar *key_ptr,
                         bson::BSONObjBuilder &obj_builder,
                         const char *op_str )
 {
-   if( key_part_map_val & 1  && ( !key_part->null_bit || 0 == *key_ptr )) 
-   { 
+   if(NULL == key_ptr)
+   {
+      return;
+   }
+
+   if( key_part_map_val & 1  && ( !key_part->null_bit || 0 == *key_ptr ))
+   {
       if ( 4 == key_part->length )
       {
          float tmp = *((float *)(key_ptr+key_part->store_length-key_part->length)) ;
@@ -464,145 +477,352 @@ void get_float_key_val( const uchar *key_ptr,
    }
 }
 
-void get_float_key_range_obj( const uchar *start_key_ptr,
-                              key_part_map start_key_part_map,
-                              enum ha_rkey_function start_find_flag,
-                              const uchar *end_key_ptr,
-                              key_part_map end_key_part_map,
-                              enum ha_rkey_function end_find_flag,
-                              const KEY_PART_INFO *key_part,
-                              bson::BSONObj &obj )
+void get_float_key_obj( const uchar *key_ptr,
+                               key_part_map key_part_map,
+                               const KEY_PART_INFO *key_part,
+                               bson::BSONObj &obj,
+                               const char *op_str)
 {
    bson::BSONObjBuilder obj_builder ;
-   if ( HA_READ_KEY_EXACT == start_find_flag )
-   {
-      get_float_key_val( start_key_ptr, start_key_part_map,
-                        key_part, obj_builder, "$et" ) ;
-   }
-   else
-   {
-      get_float_key_val( start_key_ptr, start_key_part_map,
-                         key_part, obj_builder, "$gte" ) ;
-      get_float_key_val( end_key_ptr, end_key_part_map,
-                         key_part, obj_builder, "$lte" ) ;
-   }
+   get_float_key_val( key_ptr, key_part_map,
+                       key_part, obj_builder, op_str) ;
 
    obj = obj_builder.obj() ;
 }
 
-int build_match_obj_by_start_stop_key( uint keynr,
-                                       const uchar *key_ptr,
-                                       key_part_map keypart_map,
-                                       enum ha_rkey_function find_flag,
-                                       key_range *end_range,
-                                       TABLE *table,
-                                       bson::BSONObj &matchObj )
+int build_start_end_key_obj(const uchar *start_key_ptr,
+                                    key_part_map start_key_part_map,
+                                    const uchar *end_key_ptr,
+                                    key_part_map end_key_part_map,
+                                    const KEY_PART_INFO *key_part,
+                                    bson::BSONObj &start_key_obj,
+                                    bson::BSONObj &end_key_obj,
+                                    const char *start_key_op_str,
+                                    const char *end_key_op_str,
+                                    enum ha_rkey_function end_find_flag)
+{
+   int rc = 0;
+
+   switch(key_part->field->type())
+   {
+      case MYSQL_TYPE_TINY:
+      case MYSQL_TYPE_SHORT:
+      case MYSQL_TYPE_LONG:
+      case MYSQL_TYPE_INT24:
+      case MYSQL_TYPE_LONGLONG:
+      {
+         get_int_key_obj(start_key_ptr,
+                         start_key_part_map,
+                         key_part,
+                         start_key_obj,
+                         start_key_op_str);
+         get_int_key_obj(end_key_ptr,
+                         end_key_part_map,
+                         key_part,
+                         end_key_obj,
+                         end_key_op_str);
+         break;
+      }
+      case MYSQL_TYPE_FLOAT:
+      case MYSQL_TYPE_DOUBLE:
+      {
+         get_float_key_obj(start_key_ptr,
+                           start_key_part_map,
+                           key_part,
+                           start_key_obj,
+                           start_key_op_str);
+         get_float_key_obj(end_key_ptr,
+                           end_key_part_map,
+                           key_part,
+                           end_key_obj,
+                           end_key_op_str);
+         break ;
+      }
+      case MYSQL_TYPE_VARCHAR:
+      case MYSQL_TYPE_STRING:
+      case MYSQL_TYPE_VAR_STRING:
+      case MYSQL_TYPE_TINY_BLOB:
+      case MYSQL_TYPE_MEDIUM_BLOB:
+      case MYSQL_TYPE_LONG_BLOB:
+      case MYSQL_TYPE_BLOB:
+      {
+         if (!key_part->field->binary())
+         {
+            get_text_key_obj(start_key_ptr,
+                            start_key_part_map,
+                            key_part,
+                            start_key_obj,
+                            start_key_op_str);
+            if(HA_READ_BEFORE_KEY == end_find_flag)
+            {
+               get_text_key_obj(end_key_ptr,
+                               end_key_part_map,
+                               key_part,
+                               end_key_obj,
+                               end_key_op_str);
+            }
+         }
+         else
+         {
+            //TODO: process the binary
+            rc = HA_ERR_UNSUPPORTED ;
+            goto error;
+         }
+         break ;
+      }
+
+      default:
+         rc = HA_ERR_UNSUPPORTED;
+         goto error;
+   }
+   
+done:
+   return rc;
+error:
+   goto done;
+}
+
+int build_match_obj_by_key_parts( uint keynr,
+                                              const uchar *key_ptr,
+                                              key_part_map keypart_map,
+                                              key_range *end_range,
+                                              TABLE *table,
+                                              bson::BSONObj &matchObj,
+                                              const char *op_str,
+                                              bool exact_read)
 {
    int rc = 0 ;
    KEY *keyInfo ;
-   const KEY_PART_INFO *keyPart ;
-   const KEY_PART_INFO *keyEnd ;
-   const uchar *startKeyPtr = key_ptr ;
-   key_part_map startKeyPartMap = keypart_map ;
-   const uchar *endKeyPtr = NULL ;
-   key_part_map endKeyPartMap = 0 ;
-   enum ha_rkey_function endFindFlag = HA_READ_INVALID ;
-   bson::BSONObjBuilder objBuilder ;
+   bson::BSONObj start_key_obj, end_key_obj;
+   bson::BSONObj start_obj, end_obj, start, end;
+   bson::BSONArrayBuilder start_obj_arr, end_obj_arr;
+   bson::BSONArrayBuilder array_builder;
+   const char *end_key_op_str;
+   const KEY_PART_INFO *key_start;
+   const KEY_PART_INFO *key_part ;
+   const KEY_PART_INFO *key_part_temp;
+   const KEY_PART_INFO *key_end ;
+   const uchar *start_key_ptr = key_ptr ;
+   key_part_map start_key_part_map = keypart_map ;
+   const uchar *end_key_ptr = NULL ;
+   key_part_map end_key_part_map = 0 ;
 
-   if ( MAX_KEY == keynr || table->s->keys <= 0 )
+   const uchar *start_key_ptr_tmp;
+   const uchar *end_key_ptr_tmp;
+   key_part_map start_key_part_map_tmp = 0;
+   key_part_map end_key_part_map_tmp = 0;
+   enum ha_rkey_function end_find_flag = HA_READ_INVALID ;
+   const char *final_op_str = NULL;
+   bool start_obj_arr_empty = true;
+   bool end_obj_arr_empty = true;   
+
+   if(MAX_KEY == keynr || table->s->keys <= 0)
    {
-      goto error ;
+      return rc ;
    }
 
    keyInfo = table->key_info + keynr ;
-   if ( NULL == keyInfo || NULL == keyInfo->key_part )
+   if(NULL == keyInfo || NULL == keyInfo->key_part)
    {
-      goto done ;
+      return rc ;
    }
 
-   if ( NULL != end_range )
+   key_start = keyInfo->key_part;
+   key_end = key_start + keyInfo->user_defined_key_parts ;
+   start_key_ptr = key_ptr;
+   start_key_part_map = keypart_map;
+   
+   if(NULL != end_range)
    {
-      endKeyPtr = end_range->key ;
-      endKeyPartMap = end_range->keypart_map ;
-      endFindFlag = end_range->flag ;
+      end_key_ptr = end_range->key;
+      end_key_part_map = end_range->keypart_map;
+      end_find_flag = end_range->flag ;
+      end_key_op_str = "$lte";
+   }
+   else
+   {
+      end_key_ptr = NULL;
+      end_key_part_map_tmp = 0;
    }
 
-   keyPart = keyInfo->key_part ;
-   keyEnd = keyPart + keyInfo->user_defined_key_parts ;
-   for( ; keyPart != keyEnd && (startKeyPartMap|endKeyPartMap);
-        ++keyPart )
+   for(key_part = key_start ; key_part != key_end && (start_key_part_map|end_key_part_map);
+        ++key_part )
    {
-      bson::BSONObj tmp_obj ;
-      switch( keyPart->field->type() )
+      bson::BSONArrayBuilder start_key_array_builder;
+      bson::BSONArrayBuilder end_key_array_builder;
+      bool start_key_array_empty = true;
+      bool end_key_array_empty = true;
+      
+      start_key_ptr_tmp = key_ptr;
+      start_key_part_map_tmp = keypart_map;
+      if(NULL != end_range)
       {
-         case MYSQL_TYPE_TINY:
-         case MYSQL_TYPE_SHORT:
-         case MYSQL_TYPE_LONG:
-         case MYSQL_TYPE_INT24:
-         case MYSQL_TYPE_LONGLONG:
-            {
-               get_int_key_range_obj( startKeyPtr,
-                                      startKeyPartMap,
-                                      find_flag,
-                                      endKeyPtr,
-                                      endKeyPartMap,
-                                      endFindFlag,
-                                      keyPart, tmp_obj ) ;
-               break ;
-            }
-         case MYSQL_TYPE_FLOAT:
-         case MYSQL_TYPE_DOUBLE:
-            {
-               get_float_key_range_obj( startKeyPtr,
-                                        startKeyPartMap,
-                                        find_flag,
-                                        endKeyPtr,
-                                        endKeyPartMap,
-                                        endFindFlag,
-                                        keyPart, tmp_obj ) ;
-               break ;
-            }
-         case MYSQL_TYPE_VARCHAR:
-         case MYSQL_TYPE_STRING:
-         case MYSQL_TYPE_VAR_STRING:
-         case MYSQL_TYPE_TINY_BLOB:
-         case MYSQL_TYPE_MEDIUM_BLOB:
-         case MYSQL_TYPE_LONG_BLOB:
-         case MYSQL_TYPE_BLOB:
-            {
-               if ( !keyPart->field->binary() )
-               {
-                    get_text_key_range_obj(startKeyPtr,
-                                          startKeyPartMap,
-                                          find_flag,
-                                          endKeyPtr,
-                                          endKeyPartMap,
-                                          endFindFlag,
-                                          keyPart, tmp_obj ) ;
-               }
-               else
-               {
-                  //TODO: process the binary
-                  rc = HA_ERR_UNSUPPORTED ;
-               }
-               break ;
-            }
-         default:
-            rc = HA_ERR_UNSUPPORTED ;
-            break ;
+         end_key_ptr_tmp = end_range->key;
+         end_key_part_map_tmp = end_range->keypart_map;
       }
-      if ( !tmp_obj.isEmpty() )
+      else
       {
-         objBuilder.append( keyPart->field->field_name,
-                            tmp_obj ) ;
+         end_key_ptr_tmp = NULL;
+         end_key_part_map_tmp = 0;
       }
-      startKeyPtr += keyPart->store_length ;
-      endKeyPtr += keyPart->store_length ;
-      startKeyPartMap >>= 1 ;
-      endKeyPartMap >>= 1 ;
-   }
-   matchObj = objBuilder.obj() ;
 
+      for(key_part_temp = (exact_read)?key_part:key_start; key_part_temp < key_part; ++key_part_temp)
+      {  
+         rc = build_start_end_key_obj(start_key_ptr_tmp,
+                                    start_key_part_map_tmp,
+                                    end_key_ptr_tmp,
+                                    end_key_part_map_tmp,
+                                    key_part_temp,
+                                    start_key_obj,
+                                    end_key_obj,
+                                    "$et",
+                                    "$et",
+                                    end_find_flag);
+         if(rc)
+         {
+            goto error;;
+         }
+
+         if(!start_key_obj.isEmpty())
+         {
+            start_key_array_builder.append(BSON(key_part_temp->field->field_name << start_key_obj));
+            start_key_array_empty = false;
+            start_key_obj = empty_obj;
+         }
+         if(!end_key_obj.isEmpty())
+         {
+            end_key_array_builder.append(BSON(key_part_temp->field->field_name << end_key_obj));
+            end_key_array_empty = false;
+            end_key_obj = empty_obj;
+         }
+
+         start_key_ptr_tmp += key_part_temp->store_length;
+         end_key_ptr_tmp += key_part_temp->store_length;
+         start_key_part_map_tmp >>= 1;
+         end_key_part_map_tmp >>= 1;
+      }
+      
+      if(key_part_temp == key_part)
+      {
+         rc = build_start_end_key_obj(start_key_ptr,
+                                    start_key_part_map,
+                                    end_key_ptr,
+                                    end_key_part_map,
+                                    key_part_temp,
+                                    start_key_obj,
+                                    end_key_obj,
+                                    op_str,
+                                    end_key_op_str,
+                                    end_find_flag);
+         if(rc)
+         {
+            goto error;;
+         }
+
+         if(!start_key_obj.isEmpty())
+         {
+            start_key_array_builder.append(BSON(key_part_temp->field->field_name << start_key_obj));
+            start_key_array_empty = false;
+            start_key_obj = empty_obj;
+         }
+         if(!end_key_obj.isEmpty())
+         {
+            end_key_array_builder.append(BSON(key_part_temp->field->field_name << end_key_obj));
+            end_key_array_empty = false;
+            end_key_obj = empty_obj;
+         }         
+      }
+
+      start_key_ptr += key_part_temp->store_length;
+      end_key_ptr += key_part_temp->store_length;      
+      start_key_part_map >>= 1;
+      end_key_part_map >>= 1;
+      if(!start_key_array_empty)
+      {         
+         start_obj = BSON("$and" << start_key_array_builder.arr());
+         start_obj_arr.append(start_obj);
+         start_obj_arr_empty = false;
+      }
+      if(!end_key_array_empty)
+      {
+         end_obj = BSON("$and" << end_key_array_builder.arr());
+         end_obj_arr.append(end_obj);
+         end_obj_arr_empty = false;
+      }      
+   }        
+   
+   final_op_str = (exact_read) ? "$and" : "$or";
+   if(!start_obj_arr_empty)
+   {
+      start = BSON(final_op_str << start_obj_arr.arr());
+      array_builder.append(start);
+   }
+
+   if(!end_obj_arr_empty)
+   {      
+      end = BSON(final_op_str << end_obj_arr.arr());
+      array_builder.append(end);
+   }
+   
+   matchObj = BSON("$and" << array_builder.arr());
+
+done:
+   return rc;
+error:
+   goto done;
+}
+
+int build_match_obj_by_start_stop_key( uint keynr,
+                                                     const uchar *key_ptr,
+                                                     key_part_map keypart_map,
+                                                     enum ha_rkey_function find_flag,
+                                                     key_range *end_range,
+                                                     TABLE *table,
+                                                     bson::BSONObj &matchObj,
+                                                     int *order_direction)
+{
+   int rc = 0 ;
+   sdb_search_match_mode start_match_mode = SDB_UNSUPP;
+   const char* op_str = NULL;
+   bool exact_read = false;
+
+   start_match_mode = conver_search_mode_to_sdb_mode(find_flag);
+   if(SDB_UNSUPP == start_match_mode)
+   {
+      rc = HA_ERR_UNSUPPORTED;
+   }
+   
+   *order_direction = get_key_direction(start_match_mode);
+   switch(start_match_mode)
+   {
+      case SDB_ET:
+         op_str = "$et";
+         exact_read = true;
+         break;
+      case SDB_GTE:
+         op_str = "$gte";
+         break;
+      case SDB_GT:
+         op_str = "$gt";
+         break;
+      case SDB_LT:
+         op_str = "$lt";
+         break;
+      case SDB_LTE:
+         op_str = "$lte";
+         break;
+      default:
+         rc = HA_ERR_UNSUPPORTED;
+         goto error;
+   }
+   build_match_obj_by_key_parts(keynr,
+                                key_ptr,
+                                keypart_map,
+                                end_range,
+                                table,
+                                matchObj,
+                                op_str,
+                                exact_read);
 done:
    return rc ;
 error:

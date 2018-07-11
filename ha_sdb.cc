@@ -610,10 +610,60 @@ error:
       return -1 ;
    }
 
-   int ha_sdb::index_last(uchar *buf)
+int ha_sdb::index_last(uchar *buf)
+{
+   int rc = 0 ;
+   bson::BSONObj hint ;
+   bson::BSONObj order;
+   const char *idx_name = NULL ;
+   idx_name = sdb_get_idx_name( table->key_info + keynr ) ;
+   if ( idx_name )
    {
-      return -1 ;
+      hint = BSON( "" << idx_name ) ;
    }
+   
+   rc = sdb_get_idx_order( table->key_info + keynr,  order , -1) ;
+   if ( rc )
+   {
+      goto error ;
+   }
+
+   rc = cl->query( condition, sdbclient::_sdbStaticObject,
+                   order, hint ) ;
+   if ( rc )
+   {
+      goto error ;
+   }
+   rc = index_next( buf ) ;
+   switch(rc)
+   {
+      case SDB_OK:
+         {
+            table->status = 0 ;
+            break;
+         }
+
+      case SDB_DMS_EOC:
+      case HA_ERR_END_OF_FILE:
+         {
+            rc = HA_ERR_KEY_NOT_FOUND ;
+            table->status = STATUS_NOT_FOUND ;
+            break ;
+         }
+
+      default:
+         {
+            table->status = STATUS_NOT_FOUND ;
+            break ;
+         }
+   }
+done:
+   condition = empty_obj ;
+   return rc ;
+error:
+   goto done ;
+
+}
 
 int ha_sdb::index_first(uchar *buf)
 {
@@ -669,12 +719,14 @@ int ha_sdb::index_read_map( uchar *buf, const uchar *key_ptr,
    bson::BSONObj order, hint, condition_idx ;
    bson::BSONObjBuilder cond_builder ;
    const char *idx_name = NULL ;
+   int order_direction = 1;
    if ( NULL != key_ptr && keynr >= 0 )
    {
       rc = build_match_obj_by_start_stop_key( (uint)keynr, key_ptr,
                                          keypart_map, find_flag,
                                          end_range, table,
-                                         condition_idx ) ;
+                                         condition_idx,
+                                         &order_direction) ;
    }
    if ( rc )
    {
@@ -696,7 +748,7 @@ int ha_sdb::index_read_map( uchar *buf, const uchar *key_ptr,
       hint = BSON( "" << idx_name ) ;
    }
 
-   rc = sdb_get_idx_order( table->key_info + keynr,  order ) ;
+   rc = sdb_get_idx_order( table->key_info + keynr,  order , order_direction) ;
    if ( rc )
    {
       goto error ;
