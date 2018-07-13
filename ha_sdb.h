@@ -272,6 +272,8 @@ private:
 
    int get_sharding_key( TABLE *form, bson::BSONObj &options ) ;
 
+   int index_read_one( bson::BSONObj condition, int order_direction, uchar *buf ) ;
+
 private:
    THR_LOCK_DATA                             lock_data ;
    sdb_conn_auto_ptr                         connection ;
@@ -290,4 +292,5 @@ private:
    int                                       used_times ;
    long long                                 rec_num ;
    MEM_ROOT                                  blobroot ;
+   int                                       idx_order_direction ;
 };

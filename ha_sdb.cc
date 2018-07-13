@@ -238,6 +238,7 @@ int ha_sdb::open( const char *name, int mode, uint test_if_locked )
                               table_name, CL_NAME_MAX_SIZE+1 ) ;
    if ( rc != 0 )
    {
+      SDB_LOG_ERROR( "Table name[%s] can't be parsed. rc: %d", name, rc ) ;
       goto error ;
    }
 
@@ -247,12 +248,16 @@ int ha_sdb::open( const char *name, int mode, uint test_if_locked )
    //                                      connection ) ;
    if ( 0 != rc )
    {
+      SDB_LOG_ERROR( "Thread[%u] can't get connection. rc: %d", 
+                     ha_thd()->thread_id(), rc ) ;
       goto error ;
    }
    
    rc = connection->get_cl( db_name, table_name, cl ) ;
    if ( 0 != rc )
    {
+      SDB_LOG_ERROR( "Collection[%s.%s] is not available. rc: %d", 
+                     db_name, table_name, rc ) ;
       goto error ;
    }
 
@@ -591,6 +596,8 @@ error:
 
 int ha_sdb::index_next(uchar *buf)
 {
+   assert( idx_order_direction == 1 ) ;
+
    int rc = 0 ;
    ha_statistic_increment( &SSV::ha_read_next_count ) ;
    rc = next_row( cur_rec, buf ) ;
@@ -605,104 +612,46 @@ error:
    goto done ;
 }
 
-   int ha_sdb::index_prev(uchar *buf)
+int ha_sdb::index_prev(uchar *buf)
+{
+   assert( idx_order_direction == -1 ) ;
+
+   int rc = 0 ;
+   ha_statistic_increment( &SSV::ha_read_prev_count ) ;
+   rc = next_row( cur_rec, buf ) ;
+   if ( rc != 0 )
    {
-      return -1 ;
+      goto error ;
    }
+   stats.records++ ;
+done:
+   return rc ;
+error:
+   goto done ;
+}
 
 int ha_sdb::index_last(uchar *buf)
 {
    int rc = 0 ;
-   bson::BSONObj hint ;
-   bson::BSONObj order;
-   const char *idx_name = NULL ;
-   idx_name = sdb_get_idx_name( table->key_info + keynr ) ;
-   if ( idx_name )
-   {
-      hint = BSON( "" << idx_name ) ;
-   }
-   
-   rc = sdb_get_idx_order( table->key_info + keynr,  order , -1) ;
-   if ( rc )
+   rc = index_read_one( condition, -1, buf ) ;
+   if ( rc ) 
    {
       goto error ;
-   }
-
-   rc = cl->query( condition, sdbclient::_sdbStaticObject,
-                   order, hint ) ;
-   if ( rc )
-   {
-      goto error ;
-   }
-   rc = index_next( buf ) ;
-   switch(rc)
-   {
-      case SDB_OK:
-         {
-            table->status = 0 ;
-            break;
-         }
-
-      case SDB_DMS_EOC:
-      case HA_ERR_END_OF_FILE:
-         {
-            rc = HA_ERR_KEY_NOT_FOUND ;
-            table->status = STATUS_NOT_FOUND ;
-            break ;
-         }
-
-      default:
-         {
-            table->status = STATUS_NOT_FOUND ;
-            break ;
-         }
    }
 done:
    condition = empty_obj ;
    return rc ;
 error:
    goto done ;
-
 }
 
 int ha_sdb::index_first(uchar *buf)
 {
    int rc = 0 ;
-   bson::BSONObj hint ;
-   const char *idx_name = NULL ;
-   idx_name = sdb_get_idx_name( table->key_info + keynr ) ;
-   if ( idx_name )
-   {
-      hint = BSON( "" << idx_name ) ;
-   }
-   rc = cl->query( condition, sdbclient::_sdbStaticObject,
-                   sdbclient::_sdbStaticObject, hint ) ;
-   if ( rc )
+   rc = index_read_one( condition, 1, buf ) ;
+   if ( rc ) 
    {
       goto error ;
-   }
-   rc = index_next( buf ) ;
-   switch(rc)
-   {
-      case SDB_OK:
-         {
-         	table->status = 0 ;
-   		   break;
-         }
-
-      case SDB_DMS_EOC:
-      case HA_ERR_END_OF_FILE:
-         {
-            rc = HA_ERR_KEY_NOT_FOUND ;
-            table->status = STATUS_NOT_FOUND ;
-            break ;
-         }
-
-      default:
-         {
-            table->status = STATUS_NOT_FOUND ;
-            break ;
-         }
    }
 done:
    condition = empty_obj ;
@@ -720,6 +669,7 @@ int ha_sdb::index_read_map( uchar *buf, const uchar *key_ptr,
    bson::BSONObjBuilder cond_builder ;
    const char *idx_name = NULL ;
    int order_direction = 1;
+
    if ( NULL != key_ptr && keynr >= 0 )
    {
       rc = build_match_obj_by_start_stop_key( (uint)keynr, key_ptr,
@@ -727,11 +677,13 @@ int ha_sdb::index_read_map( uchar *buf, const uchar *key_ptr,
                                          end_range, table,
                                          condition_idx,
                                          &order_direction) ;
+      if ( rc )
+      {
+         SDB_LOG_ERROR( "Fail to build index match object. rc: %d", rc ) ;
+         goto error ;
+      }
    }
-   if ( rc )
-   {
-      goto error ;
-   }
+
    if ( !condition.isEmpty() )
    {
       cond_builder.appendElements( condition ) ;
@@ -742,49 +694,86 @@ int ha_sdb::index_read_map( uchar *buf, const uchar *key_ptr,
    {
       condition = condition_idx ;
    }
-   idx_name = sdb_get_idx_name( table->key_info + keynr ) ;
+
+   rc = index_read_one( condition, order_direction, buf ) ;
+   if ( rc ) 
+   {
+      goto error ;
+   }
+done:
+   condition = empty_obj ;
+   return rc ;
+error:
+   goto done ;
+}
+
+int ha_sdb::index_read_one( bson::BSONObj condition, int order_direction, uchar *buf )
+{
+   int rc = 0 ;
+   bson::BSONObj hint ;
+   bson::BSONObj order_by ;
+   KEY *idx_key = NULL ;
+   const char *idx_name = NULL ;
+
+   idx_key = table->key_info + keynr ;
+   idx_name = sdb_get_idx_name( idx_key ) ;
    if ( idx_name )
    {
       hint = BSON( "" << idx_name ) ;
    }
+   else
+   {
+      SDB_LOG_ERROR( "Index name not found." ) ;
+      rc = SDB_ERR_INVALID_ARG ;
+      goto error ;
+   }
 
-   rc = sdb_get_idx_order( table->key_info + keynr,  order , order_direction) ;
+   idx_order_direction = order_direction ;
+   rc = sdb_get_idx_order( idx_key, order_by, order_direction ) ;
    if ( rc )
    {
+      SDB_LOG_ERROR( "Fail to get index order. rc: %d", rc ) ;
       goto error ;
    }
 
    rc = cl->query( condition, sdbclient::_sdbStaticObject,
-                   order, hint ) ;
+                   order_by, hint ) ;
    if ( rc )
    {
+      SDB_LOG_ERROR( "Collection[%s.%s] failed to query with "
+                     "condition[%s], order[%s], hint[%s]. rc: %d",
+                     cl->get_cs_name(), cl->get_cl_name(),
+                     condition.toString().c_str(), 
+                     order_by.toString().c_str(),
+                     hint.toString().c_str(), 
+                     rc ) ;
       goto error ;
    }
-   rc = index_next( buf ) ;
-   switch(rc)
+
+   rc = ( 1 == order_direction ) ? index_next( buf ) : index_prev( buf ) ;
+   switch ( rc )
    {
       case SDB_OK:
-         {
-         	table->status = 0 ;
-   		   break;
-         }
+      {
+         table->status = 0 ;
+         break;
+      }
 
       case SDB_DMS_EOC:
       case HA_ERR_END_OF_FILE:
-         {
-            rc = HA_ERR_KEY_NOT_FOUND ;
-            table->status = STATUS_NOT_FOUND ;
-            break ;
-         }
+      {
+         rc = HA_ERR_KEY_NOT_FOUND ;
+         table->status = STATUS_NOT_FOUND ;
+         break ;
+      }
 
       default:
-         {
-            table->status = STATUS_NOT_FOUND ;
-            break ;
-         }
+      {
+         table->status = STATUS_NOT_FOUND ;
+         break ;
+      }
    }
 done:
-   condition = empty_obj ;
    return rc ;
 error:
    goto done ;
@@ -1125,7 +1114,7 @@ void ha_sdb::position( const uchar *record )
       if ( beField.type() != bson::jstOID )
       {
          SDB_LOG_ERROR( "Unexpected _id's type: %d ",
-				            beField.type() );
+                        beField.type() );
       }
    }
    return ;
@@ -1926,11 +1915,11 @@ static
 int
 sdb_commit(
 /*============*/
-	handlerton*	hton,
-	THD*		thd,
-	bool		commit_trx) /*!< in: true - commit transaction
-					false - the current SQL statement
-					ended */
+   handlerton* hton,
+   THD*        thd,
+   bool        commit_trx) /*!< in: true - commit transaction
+               false - the current SQL statement
+               ended */
 {
    int rc = 0 ;
 
@@ -1970,11 +1959,11 @@ static
 int
 sdb_rollback(
 /*==============*/
-	handlerton*	hton,
-	THD*		thd,
-	bool		rollback_trx) /*!< in: TRUE - rollback entire
-					transaction FALSE - rollback the current
-					statement only */
+   handlerton* hton,
+   THD*        thd,
+   bool        rollback_trx) /*!< in: TRUE - rollback entire
+               transaction FALSE - rollback the current
+               statement only */
 {
    int rc = 0 ;
 
@@ -2012,7 +2001,7 @@ static
 void
 sdb_drop_database(
    handlerton* hton,
-   char*    path)
+   char*       path)
 {
    int rc = 0 ;
    char db_name[CS_NAME_MAX_SIZE + 1] = {0} ;
