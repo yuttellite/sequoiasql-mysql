@@ -1594,7 +1594,7 @@ int ha_sdb::get_sharding_key( TABLE *form,
 
                if ( key_part_tmp == key_end_tmp )
                {
-                  rc = SDB_INVALIDARG ;
+                  rc = SDB_ERR_INVALID_ARG ;
                   SDB_PRINT_ERROR( rc,
                                    "The unique index('%-.192s') must include the field: '%-.192s'",
                                    key_info->name, key_part->field->field_name ) ;
@@ -1658,7 +1658,7 @@ int ha_sdb::get_cl_options( TABLE *form,
       }
       if ( beOptions.type() != bson::EOO )
       {
-         rc = SDB_INVALIDARG ;
+         rc = SDB_ERR_INVALID_ARG ;
          SDB_PRINT_ERROR( rc,
                           "Failed to parse cl_options!" ) ;
          goto error ;
