@@ -27,6 +27,26 @@
 
 static bson::BSONObj empty_obj ;
 
+
+#define mi_sint2korr(A) ((int16) (((int16) (((uchar*) (A))[1])) +\
+                                  ((int16) ((int16) ((char*) (A))[0]) << 8)))
+#define mi_sint3korr(A) ((int32) (((((uchar*) (A))[0]) & 128) ? \
+                                     (((uint32) 255L << 24) | \
+                                      (((uint32) ((uchar*) (A))[0]) << 16) |\
+                                      (((uint32) ((uchar*) (A))[1]) << 8) | \
+                                      ((uint32) ((uchar*) (A))[2])) : \
+                                     (((uint32) ((uchar*) (A))[0]) << 16) |\
+                                     (((uint32) ((uchar*) (A))[1]) << 8) | \
+                                     ((uint32) ((uchar*) (A))[2])))
+
+#define mi_uint5korr(A) ((ulonglong)(((uint32) (((uchar*) (A))[4])) +\
+                                       (((uint32) (((uchar*) (A))[3])) << 8) +\
+                                       (((uint32) (((uchar*) (A))[2])) << 16) +\
+                                       (((uint32) (((uchar*) (A))[1])) << 24)) +\
+                                       (((ulonglong) (((uchar*) (A))[0])) << 32))
+                                    
+#define DATETIMEF_INT_OFS 0x8000000000LL                                    
+
 enum sdb_search_match_mode
 {
    SDB_ET = 0,
@@ -89,6 +109,7 @@ BOOLEAN is_field_indexable( const Field *field )
       case MYSQL_TYPE_FLOAT:
       case MYSQL_TYPE_DOUBLE:
       case MYSQL_TYPE_LONGLONG:
+      case MYSQL_TYPE_DATETIME:
          return TRUE ;
       case MYSQL_TYPE_VARCHAR:
       case MYSQL_TYPE_STRING:
@@ -497,16 +518,105 @@ void get_float_key_obj( const uchar *key_ptr,
    obj = obj_builder.obj() ;
 }
 
+void get_datetime_key_val( const uchar *key_ptr,
+                        key_part_map key_part_map_val,
+                        const KEY_PART_INFO *key_part,
+                        bson::BSONObjBuilder &obj_builder,
+                        const char *op_str )
+{
+   MYSQL_TIME ltime;
+   longlong ymd = 0, hms = 0;
+   longlong ymdhms = 0, ym = 0;
+   longlong tmp = 0;
+   int frac = 0;
+   uint dec = key_part->field->decimals();
+   char buff[MAX_FIELD_WIDTH];
+   int key_start_pos = key_part->store_length - key_part->length;
+
+   if(NULL == key_ptr)
+   {
+      return;
+   }
+
+   longlong intpart = mi_uint5korr(key_ptr + key_start_pos) - DATETIMEF_INT_OFS;
+
+   if( key_part_map_val & 1  && ( !key_part->null_bit || 0 == *key_ptr ))
+   {
+      switch(dec)
+      {
+         case 0:
+         default:
+            tmp = intpart << 24;
+            break;
+         case 1:
+         case 2:
+            frac = ((int)(signed char)(key_ptr + key_start_pos)[5] * 10000);
+            break;
+         case 3:
+         case 4:
+            frac = mi_sint2korr(key_ptr + key_start_pos + 5) * 100;
+            break;
+         case 5:
+         case 6:
+            frac = mi_sint3korr(key_ptr + key_start_pos + 5);
+            break;
+      }
+      tmp = (intpart << 24) + frac;
+      
+      if((ltime.neg = (tmp < 0)))
+         tmp = -tmp;
+      
+      ltime.second_part = tmp % (1LL << 24);
+      ymdhms = tmp >> 24;
+      
+      ymd = ymdhms >> 17;
+      ym = ymd >> 5;
+      hms = ymdhms % (1 << 17);
+      
+      ltime.day = ymd % (1 << 5);
+      ltime.month = ym % 13;
+      ltime.year = (uint)(ym / 13);
+      
+      ltime.second = hms % (1 << 6);
+      ltime.minute = (hms >> 6) % (1 << 6);
+      ltime.hour = (uint)(hms >> 12);
+      
+      ltime.time_type = MYSQL_TIMESTAMP_DATETIME;
+
+      int len = sprintf(buff, "%04u-%02u-%02u %s%02u:%02u:%02u", ltime.year, ltime.month, ltime.day,
+                                   (ltime.neg ? "-":""), ltime.hour, ltime.minute, ltime.second);
+      if(dec)
+      {
+         len+= sprintf(buff + len, ".%0*lu", (int) dec, ltime.second_part);
+      }
+      obj_builder.appendStrWithNoTerminating(op_str, (const char*)buff, len);
+   } 
+}
+
+void get_datetime_key_obj( const uchar *key_ptr,
+                         key_part_map key_part_map,
+                         const KEY_PART_INFO *key_part,
+                         bson::BSONObj &obj,
+                         const char *op_str)
+{
+   bson::BSONObjBuilder obj_builder ;
+   get_datetime_key_val( key_ptr, key_part_map,
+                       key_part, obj_builder, op_str) ;
+
+   obj = obj_builder.obj() ;
+}
+
+
 int build_start_end_key_obj(const uchar *start_key_ptr,
-                                    key_part_map start_key_part_map,
-                                    const uchar *end_key_ptr,
-                                    key_part_map end_key_part_map,
-                                    const KEY_PART_INFO *key_part,
-                                    bson::BSONObj &start_key_obj,
-                                    bson::BSONObj &end_key_obj,
-                                    const char *start_key_op_str,
-                                    const char *end_key_op_str,
-                                    enum ha_rkey_function end_find_flag)
+                           key_part_map start_key_part_map,
+                           const uchar *end_key_ptr,
+                           key_part_map end_key_part_map,
+                           const KEY_PART_INFO *key_part,
+                           bson::BSONObj &start_key_obj,
+                           bson::BSONObj &end_key_obj,
+                           const char *start_key_op_str,
+                           const char *end_key_op_str,
+                           enum ha_rkey_function end_find_flag)
 {
    int rc = 0;
 
@@ -577,6 +687,20 @@ int build_start_end_key_obj(const uchar *start_key_ptr,
          }
          break ;
       }
+      case MYSQL_TYPE_DATETIME:
+      {
+         get_datetime_key_obj(start_key_ptr,
+                              start_key_part_map,
+                              key_part,
+                              start_key_obj,
+                              start_key_op_str);
+         get_datetime_key_obj(end_key_ptr,
+                              end_key_part_map,
+                              key_part,
+                              end_key_obj,
+                              end_key_op_str);
+         break;
+      }
 
       default:
          rc = HA_ERR_UNSUPPORTED;
@@ -590,13 +714,13 @@ error:
 }
 
 int build_match_obj_by_key_parts( uint keynr,
-                                              const uchar *key_ptr,
-                                              key_part_map keypart_map,
-                                              key_range *end_range,
-                                              TABLE *table,
-                                              bson::BSONObj &matchObj,
-                                              const char *op_str,
-                                              bool exact_read)
+                                  const uchar *key_ptr,
+                                  key_part_map keypart_map,
+                                  key_range *end_range,
+                                  TABLE *table,
+                                  bson::BSONObj &matchObj,
+                                  const char *op_str,
+                                  bool exact_read)
 {
    int rc = 0 ;
    KEY *keyInfo ;
@@ -674,7 +798,7 @@ int build_match_obj_by_key_parts( uint keynr,
       }
 
       for(key_part_temp = (exact_read)?key_part:key_start; key_part_temp < key_part; ++key_part_temp)
-      {  
+      {
          rc = build_start_end_key_obj(start_key_ptr_tmp,
                                     start_key_part_map_tmp,
                                     end_key_ptr_tmp,

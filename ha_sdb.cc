@@ -473,29 +473,14 @@ int ha_sdb::row_to_obj( uchar *buf,  bson::BSONObj & obj,
             break ;
 
          case MYSQL_TYPE_DATETIME:
-            {
-               MYSQL_TIME ltime ;
-               if ( !(*field)->get_time( &ltime ) )
-               {
-                  struct tm tm_val ;
-                  tm_val.tm_sec = ltime.second ;
-                  tm_val.tm_min = ltime.minute ;
-                  tm_val.tm_hour = ltime.hour ;
-                  tm_val.tm_mday = ltime.day ;
-                  tm_val.tm_mon = ltime.month - 1 ;
-                  tm_val.tm_year = ltime.year - 1900 ;
-                  tm_val.tm_wday = 0 ;
-                  tm_val.tm_yday = 0 ;
-                  tm_val.tm_isdst = 0 ;
-                  time_t time_tmp = mktime( &tm_val ) ;
-                  unsigned long long time_val_tmp ;
-                  memcpy( (char *)&time_val_tmp, &(ltime.second_part), 4 ) ;
-                  memcpy( (char *)&time_val_tmp+4, &time_tmp, 4 ) ;
-                  obj_builder.appendTimestamp( (*field)->field_name,
-                                               time_val_tmp ) ;
-                  break ;
-               }
-               // go to default and return error ;
+            {        
+               char buff[MAX_FIELD_WIDTH];
+               String str(buff, sizeof(buff), (*field)->charset() );
+               String unused;
+               (*field)->val_str( &str, &unused ) ;
+               obj_builder.append( (*field)->field_name,
+                                   str.c_ptr() ) ;
+               break ;
             }
 
          default:
@@ -903,6 +888,7 @@ int ha_sdb::obj_to_row( bson::BSONObj &obj, uchar *buf )
                break ;
                               
             }
+         //datetime is stored as string
          case bson::String:
             {
                (*field)->store( befield.valuestr(),
