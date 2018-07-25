@@ -59,15 +59,15 @@ enum sdb_search_match_mode
 
 int get_key_direction(sdb_search_match_mode mode)
 {
-	switch (mode)
+   switch (mode)
    {
    case SDB_ET:
-	case SDB_GT:
+   case SDB_GT:
    case SDB_GTE:
-		return 1;
-	case SDB_LT:
-	case SDB_LTE:
-		return -1;
+      return 1;
+   case SDB_LT:
+   case SDB_LTE:
+      return -1;
    default:
       return 1;
    }
@@ -76,20 +76,20 @@ int get_key_direction(sdb_search_match_mode mode)
 
 sdb_search_match_mode conver_search_mode_to_sdb_mode(ha_rkey_function find_flag)
 {
-	switch (find_flag)
+   switch (find_flag)
    {
-	case HA_READ_KEY_EXACT:
+   case HA_READ_KEY_EXACT:
       return SDB_ET;
-	case HA_READ_KEY_OR_NEXT:
+   case HA_READ_KEY_OR_NEXT:
       return SDB_GTE;
-	case HA_READ_AFTER_KEY:		
-		return SDB_GT;
-	case HA_READ_BEFORE_KEY:
+   case HA_READ_AFTER_KEY:      
+      return SDB_GT;
+   case HA_READ_BEFORE_KEY:
       return SDB_LT;
-	case HA_READ_KEY_OR_PREV:
-	case HA_READ_PREFIX_LAST:
-	case HA_READ_PREFIX_LAST_OR_PREV:
-		return SDB_LTE;
+   case HA_READ_KEY_OR_PREV:
+   case HA_READ_PREFIX_LAST:
+   case HA_READ_PREFIX_LAST_OR_PREV:
+      return SDB_LTE;
    case HA_READ_PREFIX:
    default:
       return SDB_UNSUPP;
@@ -274,7 +274,14 @@ void get_unsigned_key_val( const uchar *key_ptr,
          case 3:
          case 4:
             {
-               obj_builder.append( op_str, val_tmp.uint32_val ) ;
+               if( val_tmp.int32_val >= 0 )
+               {
+                  obj_builder.append( op_str, val_tmp.int32_val ) ;
+               }
+               else
+               {
+                  obj_builder.append( op_str, val_tmp.int64_val ) ;
+               }
                break ;
             }
          case 8:
@@ -348,7 +355,7 @@ void get_signed_key_val( const uchar *key_ptr,
             }
          case 8:
             {
-                obj_builder.append( op_str, val_tmp.int64_val ) ;
+               obj_builder.append( op_str, val_tmp.int64_val ) ;
                break ;
             }
          default:

@@ -13,6 +13,14 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
 
+
+
+# Usage: cmake -DSDB_BUILT_IN=ON -DWITH_SDB_DRIVER=/opt/sequoiadb
+#
+# [SDB_BUILT_IN]: compile as built-in plugin or module plugin.
+# [WITH_SDB_DRIVER]: the path to SequoiaDB cpp driver, which must 
+#     contain include/ and lib/libsdbcpp.so
+
 IF(SDB_VER)
   ADD_DEFINITIONS(-DSDB_VER=\"${SDB_VER}\")
 ENDIF()
