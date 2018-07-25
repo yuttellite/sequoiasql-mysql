@@ -626,11 +626,10 @@ int sdb_func_item::get_item_val( const char *field_name,
 
       case MYSQL_TYPE_TIMESTAMP:
       case MYSQL_TYPE_TIMESTAMP2:
-      case MYSQL_TYPE_DATETIME:
          {
             MYSQL_TIME ltime ;
             if ( item_val->result_type() != STRING_RESULT
-                 || item_val->get_time( &ltime )
+                 || item_val->get_date( &ltime, TIME_FUZZY_DATE )
                  || ltime.year > 2037 || ltime.year < 1902 )
             {
                rc = SDB_ERR_COND_UNEXPECTED_ITEM ;
@@ -665,6 +664,41 @@ int sdb_func_item::get_item_val( const char *field_name,
                }
                break ;
             }
+         }
+
+      case MYSQL_TYPE_DATETIME:
+         {
+            longlong nr ;
+            MYSQL_TIME ltime ;
+            if ( item_val->result_type() != STRING_RESULT
+                 || item_val->get_date( &ltime, TIME_FUZZY_DATE )
+                 || ltime.year > 9999 || ltime.year < 1000 )
+            {
+               rc = SDB_ERR_COND_UNEXPECTED_ITEM ;
+               goto error ;
+            }
+            else
+            {
+               uint dec = field->decimals();
+               char buff[MAX_FIELD_WIDTH];
+               int len = sprintf(buff, "%04u-%02u-%02u %s%02u:%02u:%02u", ltime.year, ltime.month, ltime.day,
+                                            (ltime.neg ? "-":""), ltime.hour, ltime.minute, ltime.second);
+               if(dec)
+               {
+                  len+= sprintf(buff + len, ".%0*lu", (int) dec, ltime.second_part);
+               }               
+
+               if ( NULL == arr_builder )
+               {
+                  obj = BSON( field_name
+                              << buff ) ;
+               }
+               else
+               {
+                  arr_builder->append( buff ) ;
+               }               
+            }
+            break;
          }
 
       case MYSQL_TYPE_TIME:
