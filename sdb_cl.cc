@@ -315,6 +315,36 @@ error:
    goto done ;
 }
 
+int sdb_cl::upsert( const bson::BSONObj &rule,
+                    const bson::BSONObj &condition,
+                    const bson::BSONObj &hint,
+                    const bson::BSONObj &setOnInsert,
+                    INT32 flag )
+{
+   int rc = SDB_ERR_OK ;
+   int retry_times = 2 ;
+retry:
+   rc = cl.upsert(rule, condition, hint, setOnInsert, flag ) ;
+   if ( rc != SDB_ERR_OK )
+   {
+      goto error ;
+   }
+done:
+   return rc ;
+error:
+   if ( IS_SDB_NET_ERR(rc) )
+   {
+      bool is_transaction = p_conn->is_transaction() ;
+      if( 0 == p_conn->connect() && !is_transaction
+          && retry_times-- > 0 )
+      {
+         goto retry ;
+      }
+   }
+   convert_sdb_code( rc ) ;
+   goto done ;
+}
+
 int sdb_cl::update( const bson::BSONObj &rule,
                     const bson::BSONObj &condition,
                     const bson::BSONObj &hint,

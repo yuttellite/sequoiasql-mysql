@@ -77,6 +77,12 @@ public:
                const bson::BSONObj &hint      = sdbclient::_sdbStaticObject,
                INT32 flag = 0 ) ;
 
+   int upsert( const bson::BSONObj &rule,
+               const bson::BSONObj &condition = sdbclient::_sdbStaticObject,
+               const bson::BSONObj &hint = sdbclient::_sdbStaticObject,
+               const bson::BSONObj &setOnInsert = sdbclient::_sdbStaticObject,
+               INT32 flag = 0 ) ;
+
    int del( const bson::BSONObj &condition = sdbclient::_sdbStaticObject,
             const bson::BSONObj &hint      = sdbclient::_sdbStaticObject ) ;
 

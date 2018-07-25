@@ -537,6 +537,14 @@ int ha_sdb::write_row(uchar *buf)
    }
 
    rc = cl->insert( obj ) ;
+
+   // ignore duplicate key
+   if( SDB_ERR_INNER_CODE_END + SDB_IXM_DUP_KEY == rc
+       && ha_thd()->lex && ha_thd()->lex->is_ignore() )
+   {
+      rc = HA_ERR_FOUND_DUPP_KEY ;
+      goto error ;
+   }
    if ( rc != 0 )
    {
       goto error ;
@@ -667,7 +675,6 @@ int ha_sdb::index_read_map( uchar *buf, const uchar *key_ptr,
    int rc = 0 ;
    bson::BSONObj order, hint, condition_idx ;
    bson::BSONObjBuilder cond_builder ;
-   const char *idx_name = NULL ;
    int order_direction = 1;
 
    if ( NULL != key_ptr && keynr >= 0 )
@@ -1721,6 +1728,12 @@ int ha_sdb::create( const char *name, TABLE *form,
             rc = -1 ;
             goto error ; 
          }
+      }
+      if ( Field::NEXT_NUMBER == (*field)->unireg_check )
+      {
+         //TODO: support auto-increment field.
+         //      it is auto-increment field if run here.
+         //      the start-value is create_info->auto_increment_value
       }
    }
 
