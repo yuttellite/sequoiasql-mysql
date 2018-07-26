@@ -528,7 +528,6 @@ int ha_sdb::write_row(uchar *buf)
        && ha_thd()->lex && ha_thd()->lex->is_ignore() )
    {
       rc = HA_ERR_FOUND_DUPP_KEY ;
-      goto error ;
    }
    if ( rc != 0 )
    {
@@ -558,6 +557,14 @@ int ha_sdb::update_row( const uchar *old_data, uchar *new_data )
 
    rule_obj = BSON( "$set" << new_obj << "$unset" << null_obj ) ;
    rc = cl->update( rule_obj, cur_rec ) ;
+
+   // ignore duplicate key
+   if( SDB_ERR_INNER_CODE_END + SDB_IXM_DUP_KEY == rc
+       && ha_thd()->lex && ha_thd()->lex->is_ignore() )
+   {
+      rc = HA_ERR_FOUND_DUPP_KEY ;
+   }
+
    if ( rc != 0 )
    {
       goto error ;
