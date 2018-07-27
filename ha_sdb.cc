@@ -959,6 +959,13 @@ int ha_sdb::obj_to_row( bson::BSONObj &obj, uchar *buf )
                   myTime.time_type = MYSQL_TIMESTAMP_DATETIME ;
                   Field_temporal_with_date *f
                         = (Field_temporal_with_date *)(*field) ;
+                  if((myTime.year < 0 || myTime.month < 1 || myTime.day < 1)
+                    || (myTime.year > 9999 || myTime.month > 12 || myTime.day > 31))
+                  {
+                     myTime.year = 0;
+                     myTime.month = 0;
+                     myTime.day = 0;
+                  }
                   f->store_time( &myTime, MYSQL_TIMESTAMP_TIME ) ;
                }
                else
