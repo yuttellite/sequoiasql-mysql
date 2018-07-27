@@ -668,7 +668,6 @@ int sdb_func_item::get_item_val( const char *field_name,
 
       case MYSQL_TYPE_DATETIME:
          {
-            longlong nr ;
             MYSQL_TIME ltime ;
             if ( item_val->result_type() != STRING_RESULT
                  || item_val->get_date( &ltime, TIME_FUZZY_DATE )
