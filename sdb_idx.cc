@@ -407,6 +407,42 @@ void get_text_key_val( const uchar *key_ptr,
    return ;
 }
 
+void get_enum_key_val( const uchar *key_ptr,
+                        const KEY_PART_INFO *key_part,
+                        String &str_val )
+{
+   longlong org_val = key_part->field->val_int() ;
+
+   longlong new_val = 0 ;
+   memcpy( &new_val, key_ptr+key_part->store_length-key_part->length,
+           key_part->length );
+   if ( org_val != new_val )
+   {
+      key_part->field->store( new_val, false ) ;
+   }
+
+   key_part->field->val_str( &str_val ) ;
+
+   // restore the original value
+   if ( org_val != new_val )
+   {
+      key_part->field->store( org_val, false ) ;
+   }
+}
+
+void get_enum_key_val( const uchar *key_ptr,
+                       const KEY_PART_INFO *key_part,
+                       bson::BSONObjBuilder &obj_builder,
+                       const char *op_str )
+{
+   char buf[SDB_IDX_FIELD_SIZE_MAX+1] = {0} ;
+   String str_val( buf, SDB_IDX_FIELD_SIZE_MAX, key_part->field->charset() ) ;
+   get_enum_key_val( key_ptr, key_part, str_val ) ;
+   obj_builder.appendStrWithNoTerminating( op_str,
+                                           (const char*)(str_val.ptr()),
+                                           str_val.length() );
+}
+
 void get_text_key_obj( const uchar *key_ptr,
                             key_part_map key_part_map,
                             const KEY_PART_INFO *key_part,
@@ -414,8 +450,8 @@ void get_text_key_obj( const uchar *key_ptr,
                             const char *op_str)
 {
    bson::BSONObjBuilder obj_builder ;
-   bool is_null;
-   uchar key_field_str_buf[SDB_IDX_FIELD_SIZE_MAX] = {0};
+   bool is_null ;
+   uchar key_field_str_buf[SDB_IDX_FIELD_SIZE_MAX + 32 ] = {0}; //reserve 32bytes for operators and '\0'
 
    /*we ignore the spaces end of key string which was filled by mysql.*/
    int key_start_pos = key_part->store_length - key_part->length;
@@ -456,25 +492,62 @@ void get_text_key_obj( const uchar *key_ptr,
          '({a:{$regex:"^hello( ){0,}$"})'
          */
          key_field_str_buf[0] = '^';
-         memcpy(key_field_str_buf + 1, key_ptr + key_start_pos, length);
+         int cur_pos = 1 ;
+
+         if ( key_part->field->real_type() == MYSQL_TYPE_ENUM
+              || key_part->field->real_type() == MYSQL_TYPE_SET )
+         {
+            char enum_val_buf[ SDB_IDX_FIELD_SIZE_MAX ] = {0} ;
+            String str_val( (char*)enum_val_buf + cur_pos,
+                            SDB_IDX_FIELD_SIZE_MAX - cur_pos,
+                            key_part->field->charset() ) ;
+            get_enum_key_val( key_ptr, key_part, str_val ) ;
+            if ( str_val.length() > 0 )
+            {
+               memcpy( key_field_str_buf + cur_pos, str_val.ptr(), str_val.length() ) ;
+               cur_pos += str_val.length() ;
+            }
+         }
+         else
+         {
+            memcpy( key_field_str_buf + cur_pos, key_ptr + key_start_pos, length ) ;
+            cur_pos += length ;
+         }
 
          /*replace {a:{$et:"hello"}} with {a:{$regex:"^hello( ){0,}$"}}*/
-         strncpy((char*)&key_field_str_buf[1 + length], "( ){0,}$", sizeof("( ){0,}$"));
-         length += strlen("^") + strlen("( ){0,}$");
-         get_text_key_val( key_field_str_buf, key_part_map,
-                           obj_builder, "$regex", is_null, length);
+         strncpy((char *)key_field_str_buf + cur_pos, "( ){0,}$", sizeof("( ){0,}$")) ;
+         cur_pos += strlen("^") + strlen("( ){0,}$");
+         obj_builder.appendStrWithNoTerminating( "$regex", (const char*)key_field_str_buf, cur_pos ) ;
       }
       /* Find next rec. after key-record, or part key where a="abcdefg" (a(10), key(a(5)->"abcde")) */
       else
       {
-         get_text_key_val( key_ptr + key_start_pos, key_part_map,
-                           obj_builder, "$gte", is_null, length ) ;
+         if ( key_part->field->real_type() == MYSQL_TYPE_ENUM
+              || key_part->field->real_type() == MYSQL_TYPE_SET )
+         {
+            get_enum_key_val( key_ptr + key_start_pos, key_part,
+                              obj_builder, "$gte" ) ;
+         }
+         else
+         {
+            get_text_key_val( key_ptr + key_start_pos, key_part_map,
+                              obj_builder, "$gte", is_null, length ) ;
+         }
       }
    }
    else
    {
-      get_text_key_val( key_ptr + key_start_pos, key_part_map,
-                        obj_builder, op_str, is_null, length ) ;
+      if ( key_part->field->real_type() == MYSQL_TYPE_ENUM
+              || key_part->field->real_type() == MYSQL_TYPE_SET )
+      {
+         get_enum_key_val( key_ptr + key_start_pos, key_part,
+                           obj_builder, op_str ) ;
+      }
+      else
+      {
+         get_text_key_val( key_ptr + key_start_pos, key_part_map,
+                           obj_builder, op_str, is_null, length ) ;
+      }
    }
    obj = obj_builder.obj() ;
 }
