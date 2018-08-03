@@ -780,7 +780,7 @@ int sdb_func_isnull::to_bson( bson::BSONObj &obj )
       goto error ;
    }
    obj = BSON( ((Item_field *)item_tmp)->field_name
-                << BSON( this->name() << 0 ) ) ;
+                << BSON( this->name() << 1 ) ) ;
 
 done:
    return rc ;
@@ -814,7 +814,7 @@ int sdb_func_isnotnull::to_bson( bson::BSONObj &obj )
       goto error ;
    }
    obj = BSON( ((Item_field *)item_tmp)->field_name
-               << BSON( this->name() << 1 ) ) ;
+               << BSON( this->name() << 0 ) ) ;
 
 done:
    return rc ;
