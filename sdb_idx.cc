@@ -395,7 +395,9 @@ void get_enum_key_val( const uchar *key_ptr,
                         String &str_val )
 {
    longlong org_val = key_part->field->val_int() ;
-    longlong new_val = 0 ;
+
+   // get the enum-string by field
+   longlong new_val = 0 ;
    memcpy( &new_val, key_ptr+key_part->store_length-key_part->length,
            key_part->length );
    if ( org_val != new_val )
@@ -403,7 +405,8 @@ void get_enum_key_val( const uchar *key_ptr,
       key_part->field->store( new_val, false ) ;
    }
     key_part->field->val_str( &str_val ) ;
-    // restore the original value
+
+   // restore the original value
    if ( org_val != new_val )
    {
       key_part->field->store( org_val, false ) ;
