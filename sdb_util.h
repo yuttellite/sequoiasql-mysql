@@ -18,6 +18,7 @@
 
 #include <pthread.h>
 #include <time.h>
+#include <mysqld.h>
 #include <mysql/psi/mysql_file.h>
 
 int sdb_parse_table_name( const char * from,
@@ -26,6 +27,10 @@ int sdb_parse_table_name( const char * from,
 
 int sdb_get_db_name_from_path( const char * path,
                                char *db_name, int db_name_size ) ;
+
+int sdb_convert_charset( const String &src_str, String &dst_str, 
+                         const CHARSET_INFO *dst_charset ) ;
+
 class sdb_lock_time_out
 {
 public:
