@@ -22,6 +22,7 @@
 #include "sdb_err_code.h"
 #include "sdb_def.h"
 #include "sdb_log.h"
+#include "sdb_util.h"
 #include "sql_table.h"
 #include "bson/bsonDecimal.h"
 
@@ -404,7 +405,12 @@ void get_enum_key_val( const uchar *key_ptr,
    {
       key_part->field->store( new_val, false ) ;
    }
-    key_part->field->val_str( &str_val ) ;
+
+   // enum charset must be field_charset(latin1), so this convertion is necessary.
+   // we assert content is convertable, because error will be return when insert.
+   String org_str ;
+   key_part->field->val_str( &org_str ) ;
+   sdb_convert_charset( org_str, str_val, &SDB_CHARSET ) ;
 
    // restore the original value
    if ( org_val != new_val )
@@ -412,7 +418,8 @@ void get_enum_key_val( const uchar *key_ptr,
       key_part->field->store( org_val, false ) ;
    }
 }
- void get_enum_key_val( const uchar *key_ptr,
+
+void get_enum_key_val( const uchar *key_ptr,
                        const KEY_PART_INFO *key_part,
                        bson::BSONObjBuilder &obj_builder,
                        const char *op_str )
@@ -425,38 +432,75 @@ void get_enum_key_val( const uchar *key_ptr,
                                            str_val.length() );
 }
 
-void get_text_key_obj( const uchar *key_ptr,
-                         const KEY_PART_INFO *key_part,
-                         bson::BSONObj &obj,
-                         const char *op_str)
+int get_text_key_obj( const uchar *key_ptr,
+                      const KEY_PART_INFO *key_part,
+                      bson::BSONObj &obj,
+                      const char *op_str)
 {
+   int rc = SDB_ERR_OK ;
    bson::BSONObjBuilder obj_builder ;
+   bool is_null ;
+   const int suffix_len = 8 ; // 8 == strlen( "(%c){0,}$" )
    uchar key_field_str_buf[SDB_IDX_FIELD_SIZE_MAX + 32 ] = {0}; //reserve 32bytes for operators and '\0'
 
-   /*we ignore the spaces end of key string which was filled by mysql.*/
+   String *str = NULL ;
+   String org_str ;
+   String conv_str ;
+   const char* char_ptr ;
+
+   uchar pad_char = ' ' ;
    int key_start_pos = key_part->store_length - key_part->length;
-   int pos = key_part->store_length - 1;
+   int pos ;
+   int new_length ;
 
    if(NULL == key_ptr)
    {
-      return;
+      goto done ;
    }
 
-   while(pos >= key_start_pos && (' ' == key_ptr[pos] || '\0' == key_ptr[pos]))
+   is_null = (key_part->null_bit && 0 != *key_ptr) ? true : false;
+   if(is_null)
    {
-      pos--;
+      goto done ;
    }
 
-   pos++;
-   int length = pos - key_start_pos;
-   if(length >= SDB_IDX_FIELD_SIZE_MAX)
+   org_str.set( (const char*)(key_ptr + key_start_pos), 
+                key_part->length, 
+                key_part->field->charset() ) ;
+   str = &org_str ;
+   if( !my_charset_same( org_str.charset(), &SDB_CHARSET ) )
    {
-      return;
+      rc = sdb_convert_charset( org_str, conv_str, &SDB_CHARSET ) ;
+      if( rc )
+      {
+         goto error ;
+      }
+      str = &conv_str ;
    }
 
-   if( 0 == strcmp("$et", op_str))
+   /*we ignore the spaces end of key string which was filled by mysql.*/
+   pos = str->length() - 1 ;
+   char_ptr = str->ptr() ;
+   if( ' ' == char_ptr[pos] || '\t' == char_ptr[pos] || '\0' == char_ptr[pos] )
    {
-      if(!(key_part->key_part_flag & HA_PART_KEY_SEG && length))
+      pad_char = char_ptr[pos] ;
+      while( pos >= 0 && pad_char == char_ptr[pos] )
+      {
+         --pos;
+      }
+      new_length = pos + 1 ;
+      str->set( str->ptr(), new_length, str->charset() ) ;
+   }
+
+   if( str->length() >= SDB_IDX_FIELD_SIZE_MAX )
+   {
+      rc = SDB_ERR_SIZE_OVF ;
+      goto error ;
+   }
+
+   if(0 == strcmp("$et", op_str))
+   {
+      if(!(key_part->key_part_flag & HA_PART_KEY_SEG && str->length()))
       {
          //TODO: it is exact match if start_key_ptr is same as end_key_ptr.
          /*sdb is sensitive to spaces belong to end string, while mysql is not sensitive
@@ -483,19 +527,21 @@ void get_text_key_obj( const uchar *key_ptr,
          }
          else
          {
-            memcpy( key_field_str_buf + cur_pos, key_ptr + key_start_pos, length ) ;
-            cur_pos += length ;
+            memcpy( key_field_str_buf + cur_pos, str->ptr(), str->length() ) ;
+            cur_pos += str->length() ;
          }
 
          /*replace {a:{$et:"hello"}} with {a:{$regex:"^hello( ){0,}$"}}*/
-         strncpy((char *)key_field_str_buf + cur_pos, "( ){0,}$", sizeof("( ){0,}$")) ;
-         cur_pos += strlen("^") + strlen("( ){0,}$");
+         if ( '\0' == pad_char ) 
+            pad_char = ' ' ;
+         snprintf((char *)key_field_str_buf + cur_pos, suffix_len, "(%c){0,}$", pad_char ) ;
+         cur_pos += strlen("^") + suffix_len ;
          obj_builder.appendStrWithNoTerminating( "$regex", (const char*)key_field_str_buf, cur_pos ) ;
       }
       /* Find next rec. after key-record, or part key where a="abcdefg" (a(10), key(a(5)->"abcde")) */
       else
       {
-	      if ( key_part->field->real_type() == MYSQL_TYPE_ENUM
+         if ( key_part->field->real_type() == MYSQL_TYPE_ENUM
               || key_part->field->real_type() == MYSQL_TYPE_SET )
          {
             get_enum_key_val( key_ptr + key_start_pos, key_part,
@@ -503,11 +549,11 @@ void get_text_key_obj( const uchar *key_ptr,
          }
          else
          {
-            get_text_key_val( key_ptr + key_start_pos, obj_builder, "$gte", length ) ;
+            get_text_key_val( (const uchar*)str->ptr(), obj_builder, 
+                              "$gte", str->length() ) ;
          }
       }
    }
-
    else
    {
       if ( key_part->field->real_type() == MYSQL_TYPE_ENUM
@@ -518,10 +564,16 @@ void get_text_key_obj( const uchar *key_ptr,
       }
       else
       {
-         get_text_key_val( key_ptr + key_start_pos, obj_builder, op_str, length ) ;
+         get_text_key_val( (const uchar*)str->ptr(), obj_builder, 
+                           op_str, str->length() ) ;
       }
    }
    obj = obj_builder.obj() ;
+
+done:
+   return rc ;
+error:
+   goto done ;
 }
 
 void get_float_key_val( const uchar *key_ptr,
@@ -649,7 +701,7 @@ int build_start_end_key_obj(const uchar *start_key_ptr,
                            enum ha_rkey_function end_find_flag,
                            sdb_read_null_mode read_null_mode)
 {
-   int rc = 0;
+   int rc = SDB_ERR_OK ;
    bool start_key_part_used_and_key_isnull = (start_key_part_map & 1)
                                              && key_part->null_bit
                                              && *start_key_ptr;
@@ -748,17 +800,21 @@ int build_start_end_key_obj(const uchar *start_key_ptr,
          {
             if(start_key_part_used)
             {
-               get_text_key_obj(start_key_ptr,
-                               key_part,
-                               start_key_obj,
-                               start_key_op_str);
+               rc = get_text_key_obj(start_key_ptr,
+                                     key_part,
+                                     start_key_obj,
+                                     start_key_op_str);
+               if ( rc )
+                  goto error ;
             }
             if(end_key_part_used && HA_READ_BEFORE_KEY == end_find_flag)
             {
-               get_text_key_obj(end_key_ptr,
-                               key_part,
-                               end_key_obj,
-                               end_key_op_str);
+               rc = get_text_key_obj(end_key_ptr,
+                                     key_part,
+                                     end_key_obj,
+                                     end_key_op_str);
+               if ( rc )
+                  goto error ;
             }
          }
          else
@@ -994,13 +1050,13 @@ error:
 }
 
 int build_match_obj_by_start_stop_key( uint keynr,
-                                                     const uchar *key_ptr,
-                                                     key_part_map keypart_map,
-                                                     enum ha_rkey_function find_flag,
-                                                     key_range *end_range,
-                                                     TABLE *table,
-                                                     bson::BSONObj &matchObj,
-                                                     int *order_direction)
+                                       const uchar *key_ptr,
+                                       key_part_map keypart_map,
+                                       enum ha_rkey_function find_flag,
+                                       key_range *end_range,
+                                       TABLE *table,
+                                       bson::BSONObj &matchObj,
+                                       int *order_direction)
 {
    int rc = 0 ;
    sdb_search_match_mode start_match_mode = SDB_UNSUPP;

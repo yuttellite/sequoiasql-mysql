@@ -20,6 +20,8 @@
 #include <my_dbug.h>
 #include "sdb_item.h"
 #include "sdb_err_code.h"
+#include "sdb_util.h"
+#include "sdb_def.h"
 
 
 int sdb_logic_item::push( sdb_item *cond_item )
@@ -482,6 +484,17 @@ int sdb_func_item::get_item_val( const char *field_name,
                   rc =  SDB_ERR_INVALID_ARG ;
                   goto error ;
                }
+               String conv_str ;
+               if( !my_charset_same( pStr->charset(), &SDB_CHARSET ) )
+               {
+                  rc = sdb_convert_charset( *pStr, conv_str, &SDB_CHARSET ) ;
+                  if ( rc )
+                  {
+                     break ;
+                  }
+                  pStr = &conv_str ;
+               }
+
                if ( NULL == arr_builder )
                {
                   bson::BSONObjBuilder obj_builder ;
@@ -537,16 +550,7 @@ int sdb_func_item::get_item_val( const char *field_name,
          {
             if ( item_val->result_type() == STRING_RESULT )
             {
-               String str( buff, sizeof(buff),
-                           item_val->charset_for_protocol() ) ;
-               String *pStr = NULL ;
-               pStr = item_val->val_str( &str ) ;
                Field_str *f = (Field_str *)field ;
-               if ( NULL == pStr )
-               {
-                  rc = SDB_ERR_INVALID_ARG ;
-                  break ;
-               }
                if ( f->binary() )
                {
                   rc = SDB_ERR_TYPE_UNSUPPORTED ;
@@ -572,10 +576,34 @@ int sdb_func_item::get_item_val( const char *field_name,
                   }
                   break ;*/
                }
+
+               String *pStr = NULL ;
+               String str( buff, sizeof(buff),
+                           item_val->charset_for_protocol() ) ;
+               pStr = item_val->val_str( &str ) ;
+               if ( NULL == pStr )
+               {
+                  rc = SDB_ERR_INVALID_ARG ;
+                  break ;
+               }
+               String conv_str ;
+               if( !my_charset_same( pStr->charset(), &SDB_CHARSET ) )
+               {
+                  rc = sdb_convert_charset( *pStr, conv_str, &SDB_CHARSET ) ;
+                  if ( rc )
+                  {
+                     break ;
+                  }
+                  pStr = &conv_str ;
+               }
+
                if ( NULL == arr_builder )
                {
-                  obj = BSON( field_name
-                              << pStr->c_ptr() ) ;
+                  bson::BSONObjBuilder obj_builder ;
+                  obj_builder.appendStrWithNoTerminating( field_name,
+                                                          pStr->ptr(),
+                                                          pStr->length() ) ;
+                  obj = obj_builder.obj() ;
                }
                else
                {
