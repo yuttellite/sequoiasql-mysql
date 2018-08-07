@@ -20,6 +20,7 @@
 #include <my_dbug.h>
 #include "sdb_item.h"
 #include "sdb_err_code.h"
+#include "sdb_def.h"
 
 
 int sdb_logic_item::push( sdb_item *cond_item )
@@ -1376,6 +1377,222 @@ error:
    {
       rc = SDB_ERR_COND_PART_UNSUPPORTED ;
    }
+   goto done ;
+}
+
+sdb_func_like::sdb_func_like( int escape )
+:escape_char(escape)
+{
+}
+
+sdb_func_like::~sdb_func_like()
+{
+}
+
+int sdb_func_like::to_bson( bson::BSONObj &obj )
+{
+   int rc = SDB_ERR_OK ;
+   Item_field *item_field = NULL ;
+   Item *item_tmp = NULL ;
+   Item_string *item_val = NULL ;
+   String *str_val ;
+   std::string regex_val ;
+   bool use_eq_op = false ;
+
+   if ( !is_finished || para_list.elements != para_num_max )
+   {
+      rc = SDB_ERR_COND_INCOMPLETED ;
+      goto error ;
+   }
+
+   if ( !my_isascii( escape_char ) )
+   {
+      rc = SDB_ERR_COND_UNSUPPORTED ;
+      goto error ;
+   }
+
+   if ( l_child != NULL || r_child != NULL )
+   {
+      rc = SDB_ERR_COND_UNKOWN_ITEM ;
+      goto error ;
+   }
+
+   while( !para_list.is_empty() )
+   {
+      item_tmp = para_list.pop() ;
+      if( Item::FIELD_ITEM != item_tmp->type() )
+      {
+         if( item_tmp->type() != Item::STRING_ITEM    //only support string
+             || item_val != NULL )
+         {
+            rc = SDB_ERR_COND_UNEXPECTED_ITEM ;
+            goto error ;
+         }
+
+         item_val = (Item_string *)item_tmp ;
+      }
+      else
+      {
+         if( item_field != NULL )
+         {
+            // not support: field1 like field2
+            rc = SDB_ERR_COND_UNEXPECTED_ITEM ;
+            goto error ;
+         }
+         item_field = (Item_field *)item_tmp ;
+
+         // only support the string-field
+         if ( ( item_field->field_type() != MYSQL_TYPE_VARCHAR
+                && item_field->field_type() != MYSQL_TYPE_VAR_STRING
+                && item_field->field_type() != MYSQL_TYPE_STRING
+                && item_field->field_type() != MYSQL_TYPE_TINY_BLOB
+                && item_field->field_type() != MYSQL_TYPE_MEDIUM_BLOB
+                && item_field->field_type() != MYSQL_TYPE_LONG_BLOB
+                && item_field->field_type() != MYSQL_TYPE_BLOB )
+              || item_field->field->binary() )
+         {
+            rc = SDB_ERR_COND_UNEXPECTED_ITEM ;
+            goto error ;
+         }
+      }
+   }
+
+   // str_val may be changed in get_regex_str
+   str_val = item_val->val_str( NULL ) ;
+   rc = get_regex_str( str_val->ptr(), str_val->length(),
+                       regex_val, use_eq_op ) ;
+   if ( rc )
+   {
+      goto error ;
+   }
+
+   if ( use_eq_op )
+   {
+      // select * from t1 where a like "";
+      obj = BSON( item_field->field_name << regex_val ) ;
+   }
+   else
+   {
+      obj = BSON( item_field->field_name
+                  << BSON( "$regex" << regex_val
+                        << "$options" << "i" ) ) ;
+   }
+
+done:
+   return rc ;
+error:
+   goto done ;
+}
+
+int sdb_func_like::get_regex_str( const char *like_str,
+                                  size_t len,
+                                  std::string &regex_str,
+                                  bool &use_eq_op )
+{
+   int rc = SDB_ERR_OK ;
+   const char *p_prev, *p_cur, *p_begin, *p_end, *p_last ;
+   char str_buf[SDB_MATCH_FIELD_SIZE_MAX + 2] = {0} ; // reserve one byte for '\'
+   int buf_pos = 0 ;
+   regex_str = "" ;
+
+   if( 0 == len )
+   {
+      // select * from t1 where field like "" ;
+      use_eq_op = true ;
+      goto done ;
+   }
+
+   p_begin = like_str ;
+   p_end = p_begin + len - 1 ;
+   p_prev = p_begin ;
+   p_cur = p_begin ;
+   p_last = p_begin ;
+   while( p_cur <= p_end )
+   {
+      if ( buf_pos >= SDB_MATCH_FIELD_SIZE_MAX )
+      {
+         // reserve 2 byte for character and '\'
+         rc = SDB_ERR_SIZE_OVF ;
+      }
+
+      if( '%' == *p_cur || '_' == *p_cur )
+      {
+         // '%' and '_' are treated as normal character
+         if( escape_char != *p_prev )
+         {
+            if ( p_cur > p_last )
+            {
+               // begin with the string:
+               //     select * from t1 where field like "abc%"
+               if ( p_begin == p_last )
+               {
+                  regex_str = "^" ;
+                  regex_str.append( str_buf, buf_pos ) ;
+                  regex_str.append( ".*" ) ;
+                  buf_pos = 0 ;
+               }
+               // include the string:
+               //    select * from t1 where field like "%abc%"
+               else
+               {
+                  regex_str.append( "(?=.*" ) ;
+                  regex_str.append( str_buf, buf_pos ) ;
+                  regex_str.append( ")") ;
+                  buf_pos = 0 ;
+               }
+            }
+            p_last = p_cur + 1 ;
+            ++p_cur ;
+            continue ;
+         }
+         else
+         {
+            // skip the escape
+            str_buf[buf_pos-1] = *p_cur ;
+         }
+      }
+      else
+      {
+         if ( escape_char == *p_cur )
+         {
+            str_buf[buf_pos++] = '\\' ;
+         }
+         // process the special character: '(', ')', '[',']','{','}'
+         // add '\' before the special character
+         else if ( '(' == *p_cur || ')' == *p_cur
+              || '[' == *p_cur || ']' == *p_cur
+              || '{' == *p_cur || '}' == *p_cur )
+         {
+            str_buf[buf_pos++] = '\\' ;
+            str_buf[buf_pos++] = *p_cur ;
+         }
+         else
+         {
+            str_buf[buf_pos++] = *p_cur ;
+         }
+      }
+      if ( p_cur == p_end )
+      {
+         if ( p_last == p_begin )
+         {
+            use_eq_op = true ;
+            regex_str.append( str_buf, buf_pos ) ;
+         }
+         else
+         {
+            regex_str.append( ".*" ) ;
+            regex_str.append( str_buf, buf_pos ) ;
+            regex_str.append( "$") ;
+         }
+         buf_pos = 0 ;
+      }
+      p_prev = p_cur ;
+      ++p_cur ;
+   }
+
+done:
+   return rc ;
+error:
    goto done ;
 }
 
