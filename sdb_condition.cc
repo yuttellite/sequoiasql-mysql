@@ -222,7 +222,20 @@ void sdb_cond_ctx::push( Item *cond_item )
          goto done ;
       }
    }
-         
+
+   if ( Item::FUNC_ITEM != cond_item->type()
+        && Item::COND_ITEM != cond_item->type() )
+   {
+      // 1. When execute `select * from tb where a`, the first
+      //    item will be FIELD_ITEM. This condition has not been handled yet.
+      // 2. Subselect always can't be pushed down.
+      //
+      // This assert is to find out others condition that never be considered.
+      DBUG_ASSERT( Item::FIELD_ITEM == cond_item->type()
+                   || Item::SUBSELECT_ITEM == cond_item->type() ) ;
+      rc = SDB_ERR_COND_UNSUPPORTED ;
+      goto error ;
+   }
    item_tmp = create_sdb_item( (Item_func *)cond_item ) ;
    if ( NULL == item_tmp )
    {

@@ -954,7 +954,7 @@ int ha_sdb::obj_to_row( bson::BSONObj &obj, uchar *buf )
                   myTime.time_type = MYSQL_TIMESTAMP_DATETIME ;
                   Field_temporal_with_date *f
                         = (Field_temporal_with_date *)(*field) ;
-                  if((myTime.year < 0 || myTime.month < 1 || myTime.day < 1)
+                  if((myTime.month < 1 || myTime.day < 1)
                     || (myTime.year > 9999 || myTime.month > 12 || myTime.day > 31))
                   {
                      myTime.year = 0;
@@ -1846,8 +1846,18 @@ const Item *ha_sdb::cond_push( const Item *cond )
       goto done ;
    }
 
-   sdb_parse_condtion( cond, &sdb_condition ) ;
-   sdb_condition.to_bson( condition ) ;
+   try
+   {
+      sdb_parse_condtion( cond, &sdb_condition ) ;
+      sdb_condition.to_bson( condition ) ;
+   }
+   catch( bson::assertion e )
+   {
+      SDB_LOG_DEBUG( "Exception[%s] occurs when build bson obj.", e.full.c_str() ) ;
+      DBUG_ASSERT( 0 ) ;
+      sdb_condition.status = sdb_cond_unsupported ;
+   }
+
    if ( sdb_cond_supported == sdb_condition.status )
    {
       //TODO: build unanalysable condition
