@@ -333,6 +333,11 @@ sdb_item *sdb_cond_ctx::create_sdb_item( Item_func *cond_item )
                                     item_func->arg_count ) ;
             break ;
          }
+      case Item_func::LIKE_FUNC:
+         {
+            item = new sdb_func_like( (Item_func_like*)cond_item ) ;
+            break ;
+         }
       default:
          {
             item = new sdb_func_unkown( cond_item ) ;

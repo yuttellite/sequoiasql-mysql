@@ -283,4 +283,23 @@ public:
    virtual Item_func::Functype type() { return Item_func::IN_FUNC ; }
 } ;
 
+class sdb_func_like : public sdb_func_bin_op
+{
+public:
+   sdb_func_like( Item_func_like* item ) ;
+   virtual ~sdb_func_like() ;
+
+   virtual int to_bson( bson::BSONObj &obj ) ;
+   virtual int push( sdb_item *cond_item ) { return SDB_ERR_COND_UNEXPECTED_ITEM ; }
+   virtual const char *name() { return "like" ; }
+   virtual Item_func::Functype type() { return Item_func::LIKE_FUNC ; }
+
+private:
+   int get_regex_str( const char *like_str, size_t len,
+                      std::string &regex_str ) ;
+
+private:
+   Item_func_like             *like_item ;
+};
+
 #endif
