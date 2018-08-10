@@ -25,4 +25,6 @@
 #define SDB_IDX_FIELD_SIZE_MAX         1024
 #define SDB_MATCH_FIELD_SIZE_MAX       1024
 
+#define SDB_CHARSET                    my_charset_utf8mb4_bin
+
 #endif

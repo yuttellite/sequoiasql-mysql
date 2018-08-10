@@ -53,8 +53,6 @@ using namespace sdbclient ;
 #define SDB_LOB_META_EXT         ".lobm"
 #define SDB_ID_STR_LEN           24
 #define SDB_FIELD_MAX_LEN        (16*1024*1024)
-#define SDB_STR_BUF_STEP_SIZE    1024
-#define SDB_STR_BUF_SIZE         SDB_STR_BUF_STEP_SIZE
 const static char sdb_ver_info[] = SDB_VER_INFO ;
 
 //configuration parameter
@@ -76,8 +74,8 @@ static PSI_memory_key sdb_key_memory_blobroot;
 static uchar* sdb_get_key( SDB_SHARE *share, size_t *length,
                            my_bool not_used MY_ATTRIBUTE((unused)))
 {
-  *length=share->table_name_length;
-  return (uchar*) share->table_name;
+   *length=share->table_name_length;
+   return (uchar*) share->table_name;
 }
 
 static SDB_SHARE *get_sdb_share(const char *table_name, TABLE *table)
@@ -155,8 +153,6 @@ ha_sdb::ha_sdb(handlerton * hton, TABLE_SHARE * table_arg)
    :handler(hton, table_arg)
 {
    keynr = -1 ;
-   str_field_buf_size = SDB_STR_BUF_SIZE ;
-   str_field_buf = (char *)malloc( str_field_buf_size ) ;
    share = NULL ;
    first_read = TRUE ;
    used_times = 0 ;
@@ -168,11 +164,6 @@ ha_sdb::ha_sdb(handlerton * hton, TABLE_SHARE * table_arg)
 
 ha_sdb::~ha_sdb()
 {
-   if ( str_field_buf != NULL )
-   {
-      free( str_field_buf ) ;
-      str_field_buf_size = 0 ;
-   }
    free_root(&blobroot, MYF(0));
 }
 
@@ -369,26 +360,8 @@ int ha_sdb::row_to_obj( uchar *buf,  bson::BSONObj & obj,
          case MYSQL_TYPE_BLOB:
             {
                Field_str *f = (Field_str *)(*field) ;
-               if ( str_field_buf_size < (*field)->data_length() )
-               {
-                  uint32 str_buf_size_new = 0 ;
-                  if ( (*field)->data_length() >= SDB_FIELD_MAX_LEN )
-                  {
-                     SDB_PRINT_ERROR( ER_TOO_BIG_FIELDLENGTH,
-                                      ER(ER_TOO_BIG_FIELDLENGTH),
-                                      (*field)->field_name,
-                                      static_cast<ulong>(SDB_FIELD_MAX_LEN-1) ) ;
-                     rc = -1 ;
-                     goto error ;
-                  }
-                  str_buf_size_new
-                     = ( (*field)->data_length() / SDB_STR_BUF_STEP_SIZE + 1 )
-                       * SDB_STR_BUF_STEP_SIZE ;
-                  str_field_buf = (char *)realloc( str_field_buf,
-                                                   str_buf_size_new ) ;
-                  str_field_buf_size = str_buf_size_new ;
-               }
-               String val_tmp( str_field_buf, str_field_buf_size, (*field)->charset() ) ;
+               String *str ;
+               String val_tmp ;
                (*field)->val_str( &val_tmp, &val_tmp ) ;
                if ( f->binary() )
                {
@@ -398,9 +371,20 @@ int ha_sdb::row_to_obj( uchar *buf,  bson::BSONObj & obj,
                }
                else
                {
+                  str = &val_tmp ;
+                  if( !my_charset_same( str->charset(), &SDB_CHARSET ) )
+                  {
+                     rc = sdb_convert_charset( *str, conv_str, &SDB_CHARSET ) ;
+                     if ( rc )
+                     {
+                        goto error ;
+                     }
+                     str = &conv_str ;
+                  }
+
                   obj_builder.appendStrWithNoTerminating( (*field)->field_name,
-                                                        val_tmp.ptr(),
-                                                        val_tmp.length() ) ;
+                                                          str->ptr(),
+                                                          str->length() ) ;
                }
                break ;
             }
@@ -898,11 +882,22 @@ int ha_sdb::obj_to_row( bson::BSONObj &obj, uchar *buf )
          //datetime is stored as string
          case bson::String:
             {
-               (*field)->store( befield.valuestr(),
-                                befield.valuestrsize()-1,
-                                &my_charset_bin ) ;
+               String org_str( befield.valuestr(), 
+                               befield.valuestrsize()-1, 
+                               &SDB_CHARSET ) ;
+               String *str = &org_str ;
+               if( !my_charset_same( (*field)->charset(), &SDB_CHARSET ) )
+               {
+                  rc = sdb_convert_charset( org_str, conv_str, (*field)->charset() ) ;
+                  if ( rc )
+                  {
+                     goto error ;
+                  }
+                  str = &conv_str ;
+               }
+               (*field)->store( str->ptr(), str->length(), &my_charset_bin ) ;
                break ;
-                              
+
             }
          case bson::NumberDecimal:
             {

@@ -13,7 +13,10 @@
   along with this program; if not, write to the Free Software
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
+#include "sql_class.h"
+#include "sql_table.h"
 #include "sdb_util.h"
+#include "sdb_log.h"
 #include "sdb_err_code.h"
 #include "mysqld.h"
 #include <string.h>
@@ -88,6 +91,32 @@ int sdb_get_db_name_from_path( const char * path,
    db_name[len] = 0 ;
    my_casedn_str(system_charset_info, db_name);
    
+done:
+   return rc ;
+error:
+   goto done ;
+}
+
+int sdb_convert_charset( const String &src_str, String &dst_str, 
+                         const CHARSET_INFO *dst_charset )
+{
+   int rc = SDB_ERR_OK ;
+   uint conv_errors ;
+   if( dst_str.copy( src_str.ptr(), src_str.length(), src_str.charset(), 
+                     dst_charset, &conv_errors ) )
+   {
+      rc = SDB_ERR_OOM ;
+      goto error ;
+   }
+   if( conv_errors )
+   {
+      SDB_LOG_DEBUG( "String[%s] cannot be converted from %s to %s.", 
+                     src_str.ptr(), 
+                     src_str.charset()->csname, 
+                     dst_charset->csname ) ;
+      rc = HA_ERR_UNKNOWN_CHARSET ;
+      goto error ;
+   }
 done:
    return rc ;
 error:

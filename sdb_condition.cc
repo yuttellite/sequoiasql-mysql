@@ -322,7 +322,7 @@ sdb_item *sdb_cond_ctx::create_sdb_item( Item_func *cond_item )
          }
       case Item_func::LIKE_FUNC:
          {
-            item = new sdb_func_like( ((Item_func_like*)cond_item)->escape ) ;
+            item = new sdb_func_like( (Item_func_like*)cond_item ) ;
             break ;
          }
       default:

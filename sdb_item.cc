@@ -20,6 +20,7 @@
 #include <my_dbug.h>
 #include "sdb_item.h"
 #include "sdb_err_code.h"
+#include "sdb_util.h"
 #include "sdb_def.h"
 
 
@@ -483,6 +484,17 @@ int sdb_func_item::get_item_val( const char *field_name,
                   rc =  SDB_ERR_INVALID_ARG ;
                   goto error ;
                }
+               String conv_str ;
+               if( !my_charset_same( pStr->charset(), &SDB_CHARSET ) )
+               {
+                  rc = sdb_convert_charset( *pStr, conv_str, &SDB_CHARSET ) ;
+                  if ( rc )
+                  {
+                     break ;
+                  }
+                  pStr = &conv_str ;
+               }
+
                if ( NULL == arr_builder )
                {
                   bson::BSONObjBuilder obj_builder ;
@@ -538,16 +550,7 @@ int sdb_func_item::get_item_val( const char *field_name,
          {
             if ( item_val->result_type() == STRING_RESULT )
             {
-               String str( buff, sizeof(buff),
-                           item_val->charset_for_protocol() ) ;
-               String *pStr = NULL ;
-               pStr = item_val->val_str( &str ) ;
                Field_str *f = (Field_str *)field ;
-               if ( NULL == pStr )
-               {
-                  rc = SDB_ERR_INVALID_ARG ;
-                  break ;
-               }
                if ( f->binary() )
                {
                   rc = SDB_ERR_TYPE_UNSUPPORTED ;
@@ -573,10 +576,34 @@ int sdb_func_item::get_item_val( const char *field_name,
                   }
                   break ;*/
                }
+
+               String *pStr = NULL ;
+               String str( buff, sizeof(buff),
+                           item_val->charset_for_protocol() ) ;
+               pStr = item_val->val_str( &str ) ;
+               if ( NULL == pStr )
+               {
+                  rc = SDB_ERR_INVALID_ARG ;
+                  break ;
+               }
+               String conv_str ;
+               if( !my_charset_same( pStr->charset(), &SDB_CHARSET ) )
+               {
+                  rc = sdb_convert_charset( *pStr, conv_str, &SDB_CHARSET ) ;
+                  if ( rc )
+                  {
+                     break ;
+                  }
+                  pStr = &conv_str ;
+               }
+
                if ( NULL == arr_builder )
                {
-                  obj = BSON( field_name
-                              << pStr->c_ptr() ) ;
+                  bson::BSONObjBuilder obj_builder ;
+                  obj_builder.appendStrWithNoTerminating( field_name,
+                                                          pStr->ptr(),
+                                                          pStr->length() ) ;
+                  obj = obj_builder.obj() ;
                }
                else
                {
@@ -781,7 +808,7 @@ int sdb_func_isnull::to_bson( bson::BSONObj &obj )
       goto error ;
    }
    obj = BSON( ((Item_field *)item_tmp)->field_name
-                << BSON( this->name() << 0 ) ) ;
+                << BSON( this->name() << 1 ) ) ;
 
 done:
    return rc ;
@@ -815,7 +842,7 @@ int sdb_func_isnotnull::to_bson( bson::BSONObj &obj )
       goto error ;
    }
    obj = BSON( ((Item_field *)item_tmp)->field_name
-               << BSON( this->name() << 1 ) ) ;
+               << BSON( this->name() << 0 ) ) ;
 
 done:
    return rc ;
@@ -1380,8 +1407,8 @@ error:
    goto done ;
 }
 
-sdb_func_like::sdb_func_like( int escape )
-:escape_char(escape)
+sdb_func_like::sdb_func_like( Item_func_like* item )
+:like_item(item)
 {
 }
 
@@ -1395,9 +1422,9 @@ int sdb_func_like::to_bson( bson::BSONObj &obj )
    Item_field *item_field = NULL ;
    Item *item_tmp = NULL ;
    Item_string *item_val = NULL ;
-   String *str_val ;
+   String *str_val_org ;
+   String str_val_conv ;
    std::string regex_val ;
-   bool use_eq_op = false ;
 
    if ( !is_finished || para_list.elements != para_num_max )
    {
@@ -1405,7 +1432,8 @@ int sdb_func_like::to_bson( bson::BSONObj &obj )
       goto error ;
    }
 
-   if ( !my_isascii( escape_char ) )
+   if ( !like_item->escape_is_evaluated()
+        || !my_isascii( like_item->escape ) )
    {
       rc = SDB_ERR_COND_UNSUPPORTED ;
       goto error ;
@@ -1457,18 +1485,24 @@ int sdb_func_like::to_bson( bson::BSONObj &obj )
       }
    }
 
-   // str_val may be changed in get_regex_str
-   str_val = item_val->val_str( NULL ) ;
-   rc = get_regex_str( str_val->ptr(), str_val->length(),
-                       regex_val, use_eq_op ) ;
+   str_val_org = item_val->val_str( NULL ) ;
+   rc = sdb_convert_charset( *str_val_org, str_val_conv, &SDB_CHARSET ) ;
+   if ( rc )
+   {
+      goto error ;
+   }
+   rc = get_regex_str( str_val_conv.ptr(),
+                       str_val_conv.length(),
+                       regex_val ) ;
    if ( rc )
    {
       goto error ;
    }
 
-   if ( use_eq_op )
+   if ( regex_val.empty() )
    {
       // select * from t1 where a like "";
+      // => {a:""}
       obj = BSON( item_field->field_name << regex_val ) ;
    }
    else
@@ -1486,25 +1520,25 @@ error:
 
 int sdb_func_like::get_regex_str( const char *like_str,
                                   size_t len,
-                                  std::string &regex_str,
-                                  bool &use_eq_op )
+                                  std::string &regex_str )
 {
    int rc = SDB_ERR_OK ;
    const char *p_prev, *p_cur, *p_begin, *p_end, *p_last ;
    char str_buf[SDB_MATCH_FIELD_SIZE_MAX + 2] = {0} ; // reserve one byte for '\'
    int buf_pos = 0 ;
    regex_str = "" ;
+   int escape_char = like_item->escape ;
 
    if( 0 == len )
    {
       // select * from t1 where field like "" ;
-      use_eq_op = true ;
+      // => {field: ""}
       goto done ;
    }
 
    p_begin = like_str ;
    p_end = p_begin + len - 1 ;
-   p_prev = p_begin ;
+   p_prev = NULL ;
    p_cur = p_begin ;
    p_last = p_begin ;
    while( p_cur <= p_end )
@@ -1518,77 +1552,94 @@ int sdb_func_like::get_regex_str( const char *like_str,
       if( '%' == *p_cur || '_' == *p_cur )
       {
          // '%' and '_' are treated as normal character
-         if( escape_char != *p_prev )
+         if( p_prev != NULL && escape_char == *p_prev )
          {
-            if ( p_cur > p_last )
+            // skip the escape
+            str_buf[buf_pos-1] = *p_cur ;
+            p_prev = NULL ;
+         }
+         else
+         {
+            // begin with the string:
+            //     select * from t1 where field like "abc%"
+            //     => (^abc.*)
+            if ( p_begin == p_last )
             {
-               // begin with the string:
-               //     select * from t1 where field like "abc%"
-               if ( p_begin == p_last )
-               {
-                  regex_str = "^" ;
-                  regex_str.append( str_buf, buf_pos ) ;
-                  regex_str.append( ".*" ) ;
-                  buf_pos = 0 ;
-               }
-               // include the string:
-               //    select * from t1 where field like "%abc%"
-               else
-               {
-                  regex_str.append( "(?=.*" ) ;
-                  regex_str.append( str_buf, buf_pos ) ;
-                  regex_str.append( ")") ;
-                  buf_pos = 0 ;
-               }
+               regex_str = "^" ;
+            }
+
+            if ( buf_pos > 0 )
+            {
+               regex_str.append( str_buf, buf_pos ) ;
+               buf_pos = 0 ;
+            }
+
+            if ( '%' == *p_cur )
+            {
+               regex_str.append( ".*" ) ;
+            }
+            else
+            {
+               regex_str.append( "." ) ;
             }
             p_last = p_cur + 1 ;
             ++p_cur ;
             continue ;
          }
-         else
-         {
-            // skip the escape
-            str_buf[buf_pos-1] = *p_cur ;
-         }
       }
       else
       {
-         if ( escape_char == *p_cur )
+         if( p_prev != NULL && escape_char == *p_prev )
          {
-            str_buf[buf_pos++] = '\\' ;
-         }
-         // process the special character: '(', ')', '[',']','{','}'
-         // add '\' before the special character
-         else if ( '(' == *p_cur || ')' == *p_cur
-              || '[' == *p_cur || ']' == *p_cur
-              || '{' == *p_cur || '}' == *p_cur )
-         {
-            str_buf[buf_pos++] = '\\' ;
+            if ( buf_pos > 0 )
+            {
+               // skip the escape.
+               --buf_pos ;
+            }
+            if ( '(' == *p_cur || ')' == *p_cur
+                 || '[' == *p_cur || ']' == *p_cur
+                 || '{' == *p_cur || '}' == *p_cur
+                 || '\\' == *p_cur )
+            {
+               // process the special character: '(', ')', '[',']','{','}'
+               // add '\' before the special character
+               str_buf[buf_pos++] = '\\' ;
+            }
             str_buf[buf_pos++] = *p_cur ;
+            p_prev = NULL ;
          }
          else
          {
-            str_buf[buf_pos++] = *p_cur ;
+            if ( '(' == *p_cur || ')' == *p_cur
+                 || '[' == *p_cur || ']' == *p_cur
+                 || '{' == *p_cur || '}' == *p_cur
+                 || ( '\\' == *p_cur && escape_char != *p_cur ))
+            {
+               // process the special character: '(', ')', '[',']','{','}'
+               // add '\' before the special character
+               str_buf[buf_pos++] = '\\' ;
+               str_buf[buf_pos++] = *p_cur ;
+            }
+            else
+            {
+               str_buf[buf_pos++] = *p_cur ;
+            }
+            p_prev = p_cur ;
          }
       }
-      if ( p_cur == p_end )
-      {
-         if ( p_last == p_begin )
-         {
-            use_eq_op = true ;
-            regex_str.append( str_buf, buf_pos ) ;
-         }
-         else
-         {
-            regex_str.append( ".*" ) ;
-            regex_str.append( str_buf, buf_pos ) ;
-            regex_str.append( "$") ;
-         }
-         buf_pos = 0 ;
-      }
-      p_prev = p_cur ;
       ++p_cur ;
    }
+
+   if ( p_last == p_begin )
+   {
+      regex_str = "^" ;
+   }
+   if ( buf_pos > 0 )
+   {
+      regex_str.append( str_buf, buf_pos ) ;
+      buf_pos = 0 ;
+   }
+   regex_str.append( "$") ;
 
 done:
    return rc ;

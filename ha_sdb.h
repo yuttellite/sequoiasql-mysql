@@ -282,8 +282,7 @@ private:
    bson::BSONObj                             cur_rec ;
    bson::BSONObj                             condition ;
    int                                       keynr ; //use for index_scan
-   uint32                                    str_field_buf_size ;
-   char                                      *str_field_buf ;
+   String                                    conv_str ; //use for converting charset
    SDB_SHARE                                 *share ;
    char                                      db_name[CS_NAME_MAX_SIZE + 1] ;
    char                                      table_name[CL_NAME_MAX_SIZE + 1] ;

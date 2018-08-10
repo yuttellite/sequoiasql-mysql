@@ -142,7 +142,7 @@ public:
    ~sdb_func_isnull() ;
 
    virtual int to_bson( bson::BSONObj &obj ) ;
-   virtual const char *name() { return "$exists" ; }
+   virtual const char *name() { return "$isnull" ; }
    virtual Item_func::Functype type() { return Item_func::ISNULL_FUNC ; }
 };
 
@@ -153,7 +153,7 @@ public:
    ~sdb_func_isnotnull() ;
 
    virtual int to_bson( bson::BSONObj &obj ) ;
-   virtual const char *name() { return "$exists" ; }
+   virtual const char *name() { return "$isnull" ; }
    virtual Item_func::Functype type() { return Item_func::ISNOTNULL_FUNC ; }
 };
 
@@ -286,7 +286,7 @@ public:
 class sdb_func_like : public sdb_func_bin_op
 {
 public:
-   sdb_func_like( int escape ) ;
+   sdb_func_like( Item_func_like* item ) ;
    virtual ~sdb_func_like() ;
 
    virtual int to_bson( bson::BSONObj &obj ) ;
@@ -296,10 +296,10 @@ public:
 
 private:
    int get_regex_str( const char *like_str, size_t len,
-                      std::string &regex_str, bool &use_eq_op ) ;
+                      std::string &regex_str ) ;
 
 private:
-   int                        escape_char ;
+   Item_func_like             *like_item ;
 };
 
 #endif
