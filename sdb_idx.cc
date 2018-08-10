@@ -445,7 +445,7 @@ int get_text_key_obj( const uchar *key_ptr,
 {
    int rc = SDB_ERR_OK ;
    bson::BSONObjBuilder obj_builder ;
-   const int suffix_len = 8 ; // 8 == strlen( "(%c){0,}$" )
+   const int suffix_len = 9 ; // 9 == strlen( "(%c){0,}$" )
    uchar key_field_str_buf[SDB_IDX_FIELD_SIZE_MAX + 32 ] = {0}; //reserve 32bytes for operators and '\0'
 
    String *str = NULL ;
@@ -550,7 +550,7 @@ int get_text_key_obj( const uchar *key_ptr,
          if ( '\0' == pad_char ) 
             pad_char = ' ' ;
          snprintf((char *)key_field_str_buf + cur_pos, suffix_len, "(%c){0,}$", pad_char ) ;
-         cur_pos += strlen("^") + suffix_len ;
+         cur_pos += suffix_len ;
          obj_builder.appendStrWithNoTerminating( "$regex", (const char*)key_field_str_buf, cur_pos ) ;
       }
       /* Find next rec. after key-record, or part key where a="abcdefg" (a(10), key(a(5)->"abcde")) */
