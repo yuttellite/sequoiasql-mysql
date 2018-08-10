@@ -18,7 +18,7 @@
 
 #include <pthread.h>
 #include <time.h>
-#include <mysqld.h>
+#include "sql_class.h"
 #include <mysql/psi/mysql_file.h>
 
 int sdb_parse_table_name( const char * from,

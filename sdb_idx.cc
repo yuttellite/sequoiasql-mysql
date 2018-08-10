@@ -65,6 +65,12 @@ enum sdb_read_null_mode
    SDB_READ_NON_NULL_RECORDS = 2,
 };
 
+static inline int get_variable_key_length(const uchar *A)
+{
+   return
+      (int)(((uint16) (A[0])) + ((uint16) (A[1]) << 8));
+}
+
 int get_key_direction(sdb_search_match_mode mode)
 {
    switch (mode)
@@ -439,7 +445,6 @@ int get_text_key_obj( const uchar *key_ptr,
 {
    int rc = SDB_ERR_OK ;
    bson::BSONObjBuilder obj_builder ;
-   bool is_null ;
    const int suffix_len = 8 ; // 8 == strlen( "(%c){0,}$" )
    uchar key_field_str_buf[SDB_IDX_FIELD_SIZE_MAX + 32 ] = {0}; //reserve 32bytes for operators and '\0'
 
@@ -452,20 +457,30 @@ int get_text_key_obj( const uchar *key_ptr,
    int key_start_pos = key_part->store_length - key_part->length;
    int pos ;
    int new_length ;
+   int key_length = 0;
+
+   #define NULL_BITS 1
 
    if(NULL == key_ptr)
    {
       goto done ;
    }
 
-   is_null = (key_part->null_bit && 0 != *key_ptr) ? true : false;
-   if(is_null)
+   /*if key's length is variable, remove spaces filled by mysql from the end of varibale key string. 
+     otherwise remove from the end of store_length.*/
+   if(key_part->store_length - key_part->length > NULL_BITS)
    {
-      goto done ;
+      
+      key_length =  key_part->null_bit ? get_variable_key_length(&key_ptr[1]) :
+                     get_variable_key_length(&key_ptr[0]);
+   }
+   else
+   {
+      key_length = key_part->length;
    }
 
    org_str.set( (const char*)(key_ptr + key_start_pos), 
-                key_part->length, 
+                key_length, 
                 key_part->field->charset() ) ;
    str = &org_str ;
    if( !my_charset_same( org_str.charset(), &SDB_CHARSET ) )
