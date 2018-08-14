@@ -1170,7 +1170,8 @@ int sdb_func_cmp::to_bson( bson::BSONObj &obj )
    while( !para_list.is_empty() )
    {
       item_tmp = para_list.pop() ;
-      if ( Item::FIELD_ITEM != item_tmp->type() )
+      if ( Item::FIELD_ITEM != item_tmp->type()
+           || item_tmp->const_item() )
       {
          if ( NULL == item_field )
          {
@@ -1188,6 +1189,19 @@ int sdb_func_cmp::to_bson( bson::BSONObj &obj )
          if ( item_field != NULL )
          {
             if ( item_val != NULL )
+            {
+               rc = SDB_ERR_COND_PART_UNSUPPORTED ;
+               goto error ;
+            }
+
+            if ( NULL == item_field->db_name
+                 || NULL == ((Item_field*)item_tmp)->db_name
+                 || NULL == item_field->table_name
+                 || NULL == ((Item_field*)item_tmp)->table_name
+                 || 0!= strcmp( item_field->db_name,
+                                ((Item_field*)item_tmp)->db_name )
+                 || 0!= strcmp( item_field->table_name,
+                                ((Item_field*)item_tmp)->table_name) )
             {
                rc = SDB_ERR_COND_PART_UNSUPPORTED ;
                goto error ;
