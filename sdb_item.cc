@@ -378,14 +378,16 @@ int sdb_func_item::get_item_val( const char *field_name,
    int rc = SDB_ERR_OK ;
    char buff[MAX_FIELD_WIDTH] = {0};
    
-   if ( NULL == item_val )
+   if ( NULL == item_val
+        || !item_val->const_item()
+        || ( Item::FUNC_ITEM == item_val->type()
+             && ( ((Item_func *)item_val)->functype()
+                     == Item_func::FUNC_SP
+                  || ((Item_func *)item_val)->functype()
+                     == Item_func::TRIG_COND_FUNC )))
    {
-      rc = SDB_ERR_COND_UNEXPECTED_ITEM ;
-      goto error ;
-   }
-
-   if ( !item_val->const_item() )
-   {
+      // don't push down the triggered conditions or the func will be
+      // triggered in push down one more time
       rc = SDB_ERR_COND_UNEXPECTED_ITEM ;
       goto error ;
    }
