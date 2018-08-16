@@ -1270,7 +1270,8 @@ enum_alter_inplace_result ha_sdb::check_if_supported_inplace_alter(
       | Alter_inplace_info::DROP_COLUMN
       | Alter_inplace_info::ALTER_STORED_COLUMN_ORDER
       | Alter_inplace_info::ALTER_STORED_COLUMN_TYPE
-      | Alter_inplace_info::ALTER_COLUMN_DEFAULT;
+      | Alter_inplace_info::ALTER_COLUMN_DEFAULT
+      | Alter_inplace_info::ALTER_COLUMN_EQUAL_PACK_LENGTH ;
 
    if ( ha_alter_info->handler_flags & ~inplace_online_operations )
    {
@@ -1427,7 +1428,8 @@ bool ha_sdb::inplace_alter_table( TABLE *altered_table,
           | Alter_inplace_info::DROP_COLUMN
           | Alter_inplace_info::ALTER_STORED_COLUMN_ORDER
           | Alter_inplace_info::ALTER_STORED_COLUMN_TYPE
-          | Alter_inplace_info::ALTER_COLUMN_DEFAULT) )
+          | Alter_inplace_info::ALTER_COLUMN_DEFAULT
+          | Alter_inplace_info::ALTER_COLUMN_EQUAL_PACK_LENGTH ) )
    {
       SDB_PRINT_ERROR( HA_ERR_UNSUPPORTED,
                        "Storage engine doesn't support the operation." ) ;
