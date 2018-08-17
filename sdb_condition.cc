@@ -282,7 +282,7 @@ sdb_item *sdb_cond_ctx::create_sdb_item( Item_func *cond_item )
       case Item_func::EQ_FUNC:
       case Item_func::EQUAL_FUNC:
          {
-            item = new sdb_func_eq() ;
+            item = new sdb_func_eq( cond_item ) ;
             break ;
          }
       case Item_func::NE_FUNC:

@@ -184,12 +184,16 @@ public:
 class sdb_func_eq : public sdb_func_cmp
 {
 public:
-   sdb_func_eq(){} ;
+   sdb_func_eq( Item_func *item )
+   :func_item( item ){} ;
    ~sdb_func_eq(){} ;
 
    virtual const char *name() { return "$et" ; }
    virtual const char *inverse_name() { return "$et" ; }
-   virtual Item_func::Functype type() { return Item_func::EQ_FUNC ; }
+   virtual Item_func::Functype type() { return func_item->functype() ; }
+
+private:
+   Item_func               *func_item ;
 };
 
 class sdb_func_ne : public sdb_func_cmp

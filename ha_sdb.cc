@@ -839,15 +839,7 @@ int ha_sdb::obj_to_row( bson::BSONObj &obj, uchar *buf )
       befield = obj.getField( (*field)->field_name ) ;
       if ( befield.eoo() || befield.isNull() )
       {
-         if ( ((*field)->flags & NO_DEFAULT_VALUE_FLAG )
-              || !((*field)->flags & NOT_NULL_FLAG ) )
-         {
-            (*field)->set_null() ;
-         }
-         else
-         {
-            (*field)->set_default() ;
-         }
+         (*field)->set_null() ;
          continue ;
       }
 

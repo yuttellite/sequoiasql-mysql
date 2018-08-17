@@ -407,6 +407,11 @@ int sdb_func_item::get_item_val( const char *field_name,
             obj = BSON( "$exists" << 1 ) ;
             goto done ;
          }
+         else if( type() == Item_func::EQUAL_FUNC )
+         {
+            obj = BSON( "$isnull" << 1 ) ;
+            goto done ;
+         }
       }
       rc = SDB_ERR_OVF ;
       goto error ;
