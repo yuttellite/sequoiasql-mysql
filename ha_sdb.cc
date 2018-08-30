@@ -536,7 +536,14 @@ int ha_sdb::update_row( const uchar *old_data, uchar *new_data )
    rc = row_to_obj( new_data, new_obj, TRUE, null_obj ) ;
    if ( rc != 0 )
    {
-      goto error ;
+      if ( HA_ERR_UNKNOWN_CHARSET == rc && ha_thd()->lex->is_ignore() )
+      {
+         rc = 0 ;
+      }
+      else
+      {
+         goto error ;
+      }
    }
 
    rule_obj = BSON( "$set" << new_obj << "$unset" << null_obj ) ;
