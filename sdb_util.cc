@@ -101,7 +101,7 @@ int sdb_convert_charset( const String &src_str, String &dst_str,
                          const CHARSET_INFO *dst_charset )
 {
    int rc = SDB_ERR_OK ;
-   uint conv_errors ;
+   uint conv_errors = 0 ;
    if( dst_str.copy( src_str.ptr(), src_str.length(), src_str.charset(), 
                      dst_charset, &conv_errors ) )
    {
