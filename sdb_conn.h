@@ -22,58 +22,54 @@
 #include <atomic_class.h>
 #include "client.hpp"
 
+class sdb_conn_auto_ptr;
+class sdb_cl_auto_ptr;
 
-class sdb_conn_auto_ptr ;
-class sdb_cl_auto_ptr ;
-class sdb_conn
-{
-public:
+class sdb_conn {
+ public:
+  sdb_conn(my_thread_id _tid);
 
-   sdb_conn( my_thread_id _tid ) ;
+  ~sdb_conn();
 
-   ~sdb_conn() ;
+  int connect();
 
-   int connect( ) ;
+  sdbclient::sdb &get_sdb();
 
-   sdbclient::sdb & get_sdb() ;
+  my_thread_id get_tid();
 
-   my_thread_id get_tid() ;
+  int begin_transaction();
 
-   int begin_transaction() ;
+  int commit_transaction();
 
-   int commit_transaction() ;
+  int rollback_transaction();
 
-   int rollback_transaction() ;
+  bool is_transaction();
 
-   bool is_transaction() ;
+  int get_cl(char *cs_name, char *cl_name, sdb_cl_auto_ptr &cl_ptr,
+             bool create = FALSE,
+             const bson::BSONObj &options = sdbclient::_sdbStaticObject);
 
-   int get_cl( char *cs_name, char *cl_name,
-               sdb_cl_auto_ptr &cl_ptr,
-               bool create = FALSE,
-               const bson::BSONObj &options = sdbclient::_sdbStaticObject ) ;
+  int create_cl(char *cs_name, char *cl_name, sdb_cl_auto_ptr &cl_ptr,
+                const bson::BSONObj &options = sdbclient::_sdbStaticObject);
 
-   int create_cl( char *cs_name, char *cl_name,
-                  sdb_cl_auto_ptr &cl_ptr,
-                  const bson::BSONObj &options = sdbclient::_sdbStaticObject ) ;
+  int drop_cs(char *cs_name);
 
-   int drop_cs( char *cs_name ) ;
+  void clear_cl(char *cs_name, char *cl_name);
 
-   void clear_cl( char *cs_name, char *cl_name ) ;
+  void clear_all_cl();
 
-   void clear_all_cl() ;
+  bool is_idle();
 
-   bool is_idle() ;
+  int create_global_domain(const char *domain_name);
 
-   int create_global_domain( const char *domain_name ) ;
+  int create_global_domain_cs(const char *domain_name, char *cs_name);
 
-   int create_global_domain_cs( const char *domain_name, char *cs_name ) ;
-
-private:
-   sdbclient::sdb                                  connection ;
-   bool                                            transactionon ;
-   my_thread_id                                    tid ;
-   pthread_rwlock_t                                rw_mutex ;
-   std::multimap<std::string, sdb_cl_auto_ptr>     cl_list ;
-} ;
+ private:
+  sdbclient::sdb connection;
+  bool transactionon;
+  my_thread_id tid;
+  pthread_rwlock_t rw_mutex;
+  std::multimap<std::string, sdb_cl_auto_ptr> cl_list;
+};
 
 #endif

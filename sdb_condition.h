@@ -13,52 +13,47 @@
   along with this program; if not, write to the Free Software
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
-
 #ifndef SDB_CONDITION__H
 #define SDB_CONDITION__H
 
 #include "sdb_item.h"
 
-enum sdb_cond_status
-{
-   sdb_cond_supported = 1,
-   sdb_cond_partsupported,
-   sdb_cond_beforesupported,
-   sdb_cond_unsupported,
+enum sdb_cond_status {
+  sdb_cond_supported = 1,
+  sdb_cond_partsupported,
+  sdb_cond_beforesupported,
+  sdb_cond_unsupported,
 
-   sdb_cond_unknown = 65535
-} ;
+  sdb_cond_unknown = 65535
+};
 
-class sdb_cond_ctx : public Sql_alloc
-{
-public:
+class sdb_cond_ctx : public Sql_alloc {
+ public:
+  sdb_cond_ctx();
 
-   sdb_cond_ctx() ;
+  ~sdb_cond_ctx();
 
-   ~sdb_cond_ctx() ;
+  void push(Item *cond_item);
 
-   void push( Item *cond_item ) ;
+  void pop();
 
-   void pop() ;
+  void pop_all();
 
-   void pop_all() ;
+  void clear();
 
-   void clear() ;
+  sdb_item *create_sdb_item(Item_func *cond_item);
 
-   sdb_item *create_sdb_item( Item_func *cond_item ) ;
+  int to_bson(bson::BSONObj &obj);
 
-   int to_bson( bson::BSONObj &obj ) ;
+  void update_stat(int rc);
 
-   void update_stat( int rc ) ;
+  bool keep_on();
 
-   bool keep_on() ;
+  sdb_item *cur_item;
+  List<sdb_item> item_list;
+  sdb_cond_status status;
+};
 
-   sdb_item                   *cur_item ;
-   List<sdb_item>             item_list ;
-   sdb_cond_status            status ;
-} ;
-
-void sdb_parse_condtion( const Item *cond_item, sdb_cond_ctx *sdb_cond ) ;
-
+void sdb_parse_condtion(const Item *cond_item, sdb_cond_ctx *sdb_cond);
 
 #endif

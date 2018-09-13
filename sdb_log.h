@@ -21,35 +21,34 @@
 
 #define SDB_LOG_BUF_SIZE 1024
 
-#define SDB_LOG_DEBUG( format, ... ) \
-   do { \
-      if ( SDB_CONF_INST->get_debug_log() ) \
-      { \
-         sdb_log( INFORMATION_LEVEL, format, ##__VA_ARGS__ ) ; \
-      } \
-   } while( 0 )
+#define SDB_LOG_DEBUG(format, ...)                       \
+  do {                                                   \
+    if (SDB_CONF_INST->get_debug_log()) {                \
+      sdb_log(INFORMATION_LEVEL, format, ##__VA_ARGS__); \
+    }                                                    \
+  } while (0)
 
-#define SDB_LOG_INFO( format, ... ) \
-   do { \
-      sdb_log( INFORMATION_LEVEL, format, ##__VA_ARGS__ ) ; \
-   } while( 0 )
+#define SDB_LOG_INFO(format, ...)                      \
+  do {                                                 \
+    sdb_log(INFORMATION_LEVEL, format, ##__VA_ARGS__); \
+  } while (0)
 
-#define SDB_LOG_WARNING( format, ... ) \
-   do { \
-      sdb_log( WARNING_LEVEL, format, ##__VA_ARGS__ ) ; \
-   } while( 0 )
+#define SDB_LOG_WARNING(format, ...)               \
+  do {                                             \
+    sdb_log(WARNING_LEVEL, format, ##__VA_ARGS__); \
+  } while (0)
 
-#define SDB_LOG_ERROR( format, ... ) \
-   do { \
-      sdb_log( ERROR_LEVEL, format, ##__VA_ARGS__ ) ; \
-   } while( 0 )
+#define SDB_LOG_ERROR(format, ...)               \
+  do {                                           \
+    sdb_log(ERROR_LEVEL, format, ##__VA_ARGS__); \
+  } while (0)
 
-#define SDB_PRINT_ERROR( code, format, ... ) \
-   do { \
-      my_printf_error( code, format, MYF(0), ##__VA_ARGS__ ) ; \
-      SDB_LOG_ERROR( format, ##__VA_ARGS__ ) ; \
-   } while( 0 )
+#define SDB_PRINT_ERROR(code, format, ...)                \
+  do {                                                    \
+    my_printf_error(code, format, MYF(0), ##__VA_ARGS__); \
+    SDB_LOG_ERROR(format, ##__VA_ARGS__);                 \
+  } while (0)
 
-void sdb_log( loglevel lvl, const char *format, ... ) ;
+void sdb_log(loglevel lvl, const char *format, ...);
 
 #endif

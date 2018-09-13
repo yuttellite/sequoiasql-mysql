@@ -19,53 +19,47 @@
 #include <mysql/psi/mysql_file.h>
 #include "sdb_def.h"
 
-extern PSI_memory_key sdb_key_memory_conf_coord_addrs ;
+extern PSI_memory_key sdb_key_memory_conf_coord_addrs;
 
-class sdb_conf
-{
-public:
+class sdb_conf {
+ public:
+  ~sdb_conf();
 
-   ~sdb_conf() ;
+  static sdb_conf *get_instance();
 
-   static sdb_conf *get_instance() ;
+  int parse_conn_addrs(const char *conn_addrs);
 
-   int parse_conn_addrs( const char *conn_addrs ) ;
+  char **get_coord_addrs();
 
-   char **get_coord_addrs() ;
+  int get_coord_num();
 
-   int get_coord_num() ;
+  const char *get_global_domain_name() { return "mysql_storage_engine_domain"; }
 
-   const char * get_global_domain_name()
-   {
-      return "mysql_storage_engine_domain" ;
-   }
+  void set_use_partition(my_bool val);
 
-   void set_use_partition( my_bool val ) ;
+  my_bool get_use_partition();
 
-   my_bool get_use_partition() ;
+  void set_debug_log(my_bool val);
 
-   void set_debug_log( my_bool val ) ;
+  my_bool get_debug_log();
 
-   my_bool get_debug_log() ;
+ private:
+  sdb_conf();
 
-private:
+  sdb_conf(const sdb_conf &rh) {}
 
-   sdb_conf() ;
+  sdb_conf &operator=(const sdb_conf &rh) { return *this; }
 
-   sdb_conf(const sdb_conf & rh){}
+  void clear_coord_addrs(int num);
 
-   sdb_conf & operator = (const sdb_conf & rh) { return *this ;}
+ private:
+  char *pAddrs[SDB_COORD_NUM_MAX];
+  int coord_num;
+  pthread_rwlock_t addrs_mutex;
+  my_bool use_partition;
+  my_bool debug_log;
+};
 
-   void clear_coord_addrs( int num ) ;
-
-private:
-   char                          *pAddrs[SDB_COORD_NUM_MAX] ;
-   int                           coord_num ;
-   pthread_rwlock_t              addrs_mutex ;
-   my_bool                       use_partition ;
-   my_bool                       debug_log ;
-} ;
-
-#define SDB_CONF_INST            sdb_conf::get_instance()
+#define SDB_CONF_INST sdb_conf::get_instance()
 
 #endif
