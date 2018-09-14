@@ -47,10 +47,6 @@ using namespace sdbclient;
 #endif
 #define SDB_VER_INFO (SDB_VER_INFO_F1() SDB_VER_INFO_F2())
 
-#define SDB_DATA_EXT ".data"
-#define SDB_IDX_EXT ".idx"
-#define SDB_LOB_DATA_EXT ".lobd"
-#define SDB_LOB_META_EXT ".lobm"
 #define SDB_ID_STR_LEN 24
 #define SDB_FIELD_MAX_LEN (16 * 1024 * 1024)
 const static char sdb_ver_info[] = SDB_VER_INFO;
@@ -151,10 +147,17 @@ ha_sdb::~ha_sdb() {
   free_root(&blobroot, MYF(0));
 }
 
-static const char *ha_sdb_exts[] = {SDB_DATA_EXT, SDB_IDX_EXT, SDB_LOB_DATA_EXT,
-                                    SDB_LOB_META_EXT, NullS};
 const char **ha_sdb::bas_ext() const {
-  return ha_sdb_exts;
+  /*
+    If frm_error() is called then we will use this to find out
+    what file extensions exist for the storage engine. This is
+    also used by the default rename_table and delete_table method
+    in handler.cc.
+    SequoiaDB is a distributed database, and we have implemented delete_table,
+    so it's no need to fill this array.
+  */
+  static const char *ext[] = {NullS};
+  return ext;
 }
 
 ulonglong ha_sdb::table_flags() const {
