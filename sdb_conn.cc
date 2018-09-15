@@ -17,10 +17,10 @@
 #define MYSQL_SERVER
 #endif
 
-#include "client.hpp"
-#include "sql_class.h"
 #include "sdb_conn.h"
 #include "sdb_conn_ptr.h"
+#include <sql_class.h>
+#include <client.hpp>
 #include "sdb_cl.h"
 #include "sdb_cl_ptr.h"
 #include "sdb_conf.h"
@@ -50,9 +50,11 @@ int sdb_conn::connect() {
   if (!connection.isValid()) {
     std::map<std::string, sdb_cl_auto_ptr>::iterator iter;
     transactionon = false;
-    // MYSQL_SECURITY_CONTEXT ctx = current_thd->security_context();
-    rc = connection.connect((const CHAR **)(SDB_CONF_INST->get_coord_addrs()),
-                            SDB_CONF_INST->get_coord_num(), "", "");
+    sdb_conn_addrs conn_addrs;
+    int tmp_rc = conn_addrs.parse_conn_addrs(sdb_conn_str);
+    assert(tmp_rc == 0);
+    rc = connection.connect(conn_addrs.get_conn_addrs(),
+                            conn_addrs.get_conn_num(), "", "");
     if (rc != SDB_ERR_OK) {
       goto error;
     }

@@ -51,14 +51,6 @@ using namespace sdbclient;
 #define SDB_FIELD_MAX_LEN (16 * 1024 * 1024)
 const static char sdb_ver_info[] = SDB_VER_INFO;
 
-// configuration parameter
-static char *sdb_addr = NULL;
-static const char *SDB_ADDR_DFT = "localhost:11810";
-static my_bool SDB_USE_PARTITION_DFT = TRUE;
-static my_bool sdb_use_partition = SDB_USE_PARTITION_DFT;
-static my_bool SDB_DEBUG_LOG_DFT = FALSE;
-static my_bool sdb_debug_log = SDB_DEBUG_LOG_DFT;
-
 mysql_mutex_t sdb_mutex;
 static PSI_mutex_key key_mutex_sdb, key_mutex_SDB_SHARE_mutex;
 bson::BSONObj empty_obj;
@@ -1434,7 +1426,7 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
   sdb_conn_auto_ptr conn_tmp;
   bson::BSONObj options;
   bson::BSONObj comments;
-  my_bool use_partition;
+  my_bool use_partition = sdb_use_partition;
 
   fd = ha_thd()->thread_id();
 
@@ -1469,7 +1461,6 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
     goto error;
   }
 
-  use_partition = SDB_CONF_INST->get_use_partition();
   rc = get_cl_options(form, create_info, options, use_partition);
   if (0 != rc) {
     goto error;
@@ -1485,8 +1476,7 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
 
   // TODO: get sdb_auto_split from configure
   if (use_partition) {
-    rc = conn_tmp->create_global_domain_cs(
-        SDB_CONF_INST->get_global_domain_name(), db_name);
+    rc = conn_tmp->create_global_domain_cs(SDB_GLOBAL_DOMAIN_NAME, db_name);
   }
   if (rc != 0) {
     goto error;
@@ -1609,7 +1599,6 @@ static handler *sdb_create_handler(handlerton *hton, TABLE_SHARE *table,
 
 static PSI_memory_info all_sdb_memory[] = {
     {&key_memory_sdb_share, "SDB_SHARE", PSI_FLAG_GLOBAL},
-    {&sdb_key_memory_conf_coord_addrs, "coord_addrs", PSI_FLAG_GLOBAL},
     {&sdb_key_memory_blobroot, "blobroot", 0}};
 
 static PSI_mutex_info all_sdb_mutexes[] = {
@@ -1735,6 +1724,7 @@ error:
 
 static int sdb_init_func(void *p) {
   handlerton *sdb_hton;
+  sdb_conn_addrs conn_addrs;
 #ifdef HAVE_PSI_INTERFACE
   init_sdb_psi_keys();
 #endif
@@ -1749,12 +1739,11 @@ static int sdb_init_func(void *p) {
   sdb_hton->commit = sdb_commit;
   sdb_hton->rollback = sdb_rollback;
   sdb_hton->drop_database = sdb_drop_database;
-  if (SDB_CONF_INST->parse_conn_addrs(sdb_addr)) {
-    SDB_LOG_ERROR("Invalid value sequoiadb_conn_addr=%s", sdb_addr);
+  if (conn_addrs.parse_conn_addrs(sdb_conn_str)) {
+    SDB_LOG_ERROR("Invalid value sequoiadb_conn_addr=%s", sdb_conn_str);
     return 1;
   }
-  SDB_CONF_INST->set_use_partition(sdb_use_partition);
-  SDB_CONF_INST->set_debug_log(sdb_debug_log);
+
   return 0;
 }
 
@@ -1766,48 +1755,8 @@ static int sdb_done_func(void *p) {
   return 0;
 }
 
-static int sdb_conn_addrs_validate(THD *thd, struct st_mysql_sys_var *var,
-                                   void *save, struct st_mysql_value *value) {
-  SDB_PRINT_ERROR(
-      HA_ERR_UNSUPPORTED,
-      "'sequoiadb_conn_addr' must be modified by configuration file!");
-  return 1;
-}
-
-static void sdb_use_partition_update(THD *thd, struct st_mysql_sys_var *var,
-                                     void *save, const void *value) {
-  my_bool use_partition = *static_cast<my_bool *>(save) =
-      *static_cast<const my_bool *>(value);
-
-  SDB_CONF_INST->set_use_partition(use_partition);
-}
-
-static void sdb_debug_log_update(THD *thd, struct st_mysql_sys_var *var,
-                                 void *save, const void *value) {
-  my_bool debug_log = *static_cast<my_bool *>(save) =
-      *static_cast<const my_bool *>(value);
-
-  SDB_CONF_INST->set_debug_log(debug_log);
-}
-
 static struct st_mysql_storage_engine sdb_storage_engine = {
     MYSQL_HANDLERTON_INTERFACE_VERSION};
-
-static MYSQL_SYSVAR_STR(conn_addr, sdb_addr,
-                        PLUGIN_VAR_STR | PLUGIN_VAR_MEMALLOC, "Sequoiadb addr",
-                        sdb_conn_addrs_validate, NULL, SDB_ADDR_DFT);
-static MYSQL_SYSVAR_BOOL(use_partition, sdb_use_partition,
-                         PLUGIN_VAR_BOOL | PLUGIN_VAR_MEMALLOC,
-                         "create partition table on sequoiadb", NULL,
-                         sdb_use_partition_update, SDB_USE_PARTITION_DFT);
-static MYSQL_SYSVAR_BOOL(debug_log, sdb_debug_log,
-                         PLUGIN_VAR_BOOL | PLUGIN_VAR_MEMALLOC,
-                         "turn on debug log of sequoiadb", NULL,
-                         sdb_debug_log_update, SDB_DEBUG_LOG_DFT);
-
-static struct st_mysql_sys_var *sdb_vars[] = {MYSQL_SYSVAR(conn_addr),
-                                              MYSQL_SYSVAR(use_partition),
-                                              MYSQL_SYSVAR(debug_log), NULL};
 
 static char *get_sdb_plugin_info() {
 #ifdef SDB_ENTERPRISE
@@ -1844,8 +1793,8 @@ mysql_declare_plugin(sequoiadb){
     sdb_init_func, /* Plugin Init */
     sdb_done_func, /* Plugin Deinit */
     0x0100 /* 1.0 */,
-    NULL,     /* status variables                */
-    sdb_vars, /* system variables                */
-    NULL,     /* config options                  */
-    0,        /* flags                           */
+    NULL,         /* status variables                */
+    sdb_sys_vars, /* system variables                */
+    NULL,         /* config options                  */
+    0,            /* flags                           */
 } mysql_declare_plugin_end;

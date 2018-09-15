@@ -13,35 +13,61 @@
   along with this program; if not, write to the Free Software
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
-#include <string.h>
-#include "my_global.h"
 #include "sdb_conf.h"
 
-PSI_memory_key sdb_key_memory_conf_coord_addrs;
+static const char *SDB_ADDR_DFT = "localhost:11810";
+static const my_bool SDB_USE_PARTITION_DFT = TRUE;
+static const my_bool SDB_DEBUG_LOG_DFT = FALSE;
 
-sdb_conf::sdb_conf() {
-  use_partition = TRUE;
+char *sdb_conn_str = NULL;
+my_bool sdb_use_partition = SDB_USE_PARTITION_DFT;
+my_bool sdb_debug_log = SDB_DEBUG_LOG_DFT;
+
+static void sdb_use_partition_update(THD *thd, struct st_mysql_sys_var *var,
+                                     void *var_ptr, const void *save) {
+  *static_cast<my_bool *>(var_ptr) = *static_cast<const my_bool *>(save);
 }
 
-sdb_conf::~sdb_conf() {
-  clear_coord_addrs(coord_num);
-  coord_num = 0;
+static void sdb_debug_log_update(THD *thd, struct st_mysql_sys_var *var,
+                                 void *var_ptr, const void *save) {
+  *static_cast<my_bool *>(var_ptr) = *static_cast<const my_bool *>(save);
 }
 
-sdb_conf *sdb_conf::get_instance() {
-  static sdb_conf sdb_conf_inst;
-  return &sdb_conf_inst;
-}
+static MYSQL_SYSVAR_STR(conn_addr, sdb_conn_str,
+                        PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_READONLY,
+                        "Sequoiadb addr", NULL, NULL, SDB_ADDR_DFT);
+static MYSQL_SYSVAR_BOOL(use_partition, sdb_use_partition, PLUGIN_VAR_OPCMDARG,
+                         "create partition table on sequoiadb", NULL,
+                         sdb_use_partition_update, SDB_USE_PARTITION_DFT);
+static MYSQL_SYSVAR_BOOL(debug_log, sdb_debug_log, PLUGIN_VAR_OPCMDARG,
+                         "turn on debug log of sequoiadb storage engine", NULL,
+                         sdb_debug_log_update, SDB_DEBUG_LOG_DFT);
 
-void sdb_conf::clear_coord_addrs(int num) {
-  for (int i = 0; i < num; i++) {
-    if (pAddrs[i]) {
-      free(pAddrs[i]);
-    }
+struct st_mysql_sys_var *sdb_sys_vars[] = {MYSQL_SYSVAR(conn_addr),
+                                           MYSQL_SYSVAR(use_partition),
+                                           MYSQL_SYSVAR(debug_log), NULL};
+
+sdb_conn_addrs::sdb_conn_addrs() : conn_num(0) {
+  for (int i = 0; i < SDB_COORD_NUM_MAX; i++) {
+    addrs[i] = NULL;
   }
 }
 
-int sdb_conf::parse_conn_addrs(const char *conn_addr) {
+sdb_conn_addrs::~sdb_conn_addrs() {
+  clear_conn_addrs();
+}
+
+void sdb_conn_addrs::clear_conn_addrs() {
+  for (int i = 0; i < conn_num; i++) {
+    if (addrs[i]) {
+      free(addrs[i]);
+      addrs[i] = NULL;
+    }
+  }
+  conn_num = 0;
+}
+
+int sdb_conn_addrs::parse_conn_addrs(const char *conn_addr) {
   int rc = 0;
   const char *p = conn_addr;
 
@@ -50,15 +76,12 @@ int sdb_conf::parse_conn_addrs(const char *conn_addr) {
     goto error;
   }
 
-  // note: no lock here, the coord-addrs must set before used!
-  // sdb_rw_lock_w lock( &addrs_mutex ) ;
-  clear_coord_addrs(coord_num);
-  coord_num = 0;
+  clear_conn_addrs();
 
   while (*p != 0) {
     const char *p_tmp = NULL;
     size_t len = 0;
-    if (coord_num >= SDB_COORD_NUM_MAX) {
+    if (conn_num >= SDB_COORD_NUM_MAX) {
       goto done;
     }
 
@@ -83,8 +106,8 @@ int sdb_conf::parse_conn_addrs(const char *conn_addr) {
       }
       memcpy(p_addr, p, len);
       p_addr[len] = 0;
-      pAddrs[coord_num] = p_addr;
-      ++coord_num;
+      addrs[conn_num] = p_addr;
+      ++conn_num;
     }
     p += len;
     if (*p == ',') {
@@ -98,26 +121,10 @@ error:
   goto done;
 }
 
-char **sdb_conf::get_coord_addrs() {
-  return pAddrs;
+const char **sdb_conn_addrs::get_conn_addrs() const {
+  return (const char **)addrs;
 }
 
-int sdb_conf::get_coord_num() {
-  return coord_num;
-}
-
-void sdb_conf::set_use_partition(my_bool val) {
-  use_partition = val;
-}
-
-my_bool sdb_conf::get_use_partition() {
-  return use_partition;
-}
-
-void sdb_conf::set_debug_log(my_bool val) {
-  debug_log = val;
-}
-
-my_bool sdb_conf::get_debug_log() {
-  return debug_log;
+int sdb_conn_addrs::get_conn_num() const {
+  return conn_num;
 }
