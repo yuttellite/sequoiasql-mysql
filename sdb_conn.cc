@@ -28,29 +28,29 @@
 #include "sdb_err_code.h"
 #include "sdb_adaptor.h"
 
-sdb_conn::sdb_conn(my_thread_id _tid) : transactionon(false), tid(_tid) {
+Sdb_conn::Sdb_conn(my_thread_id _tid) : transactionon(false), tid(_tid) {
   pthread_rwlock_init(&rw_mutex, NULL);
 }
 
-sdb_conn::~sdb_conn() {
+Sdb_conn::~Sdb_conn() {
   clear_all_cl();
   pthread_rwlock_destroy(&rw_mutex);
 }
 
-sdbclient::sdb &sdb_conn::get_sdb() {
+sdbclient::sdb &Sdb_conn::get_sdb() {
   return connection;
 }
 
-my_thread_id sdb_conn::get_tid() {
+my_thread_id Sdb_conn::get_tid() {
   return tid;
 }
 
-int sdb_conn::connect() {
+int Sdb_conn::connect() {
   int rc = SDB_ERR_OK;
   if (!connection.isValid()) {
-    std::map<std::string, sdb_cl_auto_ptr>::iterator iter;
+    std::map<std::string, Sdb_cl_auto_ptr>::iterator iter;
     transactionon = false;
-    sdb_conn_addrs conn_addrs;
+    Sdb_conn_addrs conn_addrs;
     int tmp_rc = conn_addrs.parse_conn_addrs(sdb_conn_str);
     assert(tmp_rc == 0);
     rc = connection.connect(conn_addrs.get_conn_addrs(),
@@ -60,7 +60,7 @@ int sdb_conn::connect() {
     }
 
     // get the r_lock because the cl_list will not change
-    sdb_rw_lock_r r_lock(&rw_mutex);
+    Sdb_rw_lock_r r_lock(&rw_mutex);
     iter = cl_list.begin();
     while (iter != cl_list.end()) {
       iter->second->re_init();
@@ -74,7 +74,7 @@ error:
   goto done;
 }
 
-int sdb_conn::begin_transaction() {
+int Sdb_conn::begin_transaction() {
   int rc = SDB_ERR_OK;
   int retry_times = 2;
   while (!transactionon) {
@@ -96,7 +96,7 @@ error:
   goto done;
 }
 
-int sdb_conn::commit_transaction() {
+int Sdb_conn::commit_transaction() {
   int rc = SDB_ERR_OK;
   if (transactionon) {
     transactionon = false;
@@ -116,7 +116,7 @@ error:
   goto done;
 }
 
-int sdb_conn::rollback_transaction() {
+int Sdb_conn::rollback_transaction() {
   if (transactionon) {
     int rc = SDB_ERR_OK;
     transactionon = false;
@@ -128,14 +128,14 @@ int sdb_conn::rollback_transaction() {
   return 0;
 }
 
-bool sdb_conn::is_transaction() {
+bool Sdb_conn::is_transaction() {
   return transactionon;
 }
 
-int sdb_conn::get_cl(char *cs_name, char *cl_name, sdb_cl_auto_ptr &cl_ptr,
+int Sdb_conn::get_cl(char *cs_name, char *cl_name, Sdb_cl_auto_ptr &cl_ptr,
                      bool create, const bson::BSONObj &options) {
   int rc = SDB_ERR_OK;
-  std::map<std::string, sdb_cl_auto_ptr>::iterator iter;
+  std::map<std::string, Sdb_cl_auto_ptr>::iterator iter;
   cl_ptr.clear();
   std::string str_tmp(cs_name);
   str_tmp.append(".");
@@ -143,10 +143,10 @@ int sdb_conn::get_cl(char *cs_name, char *cl_name, sdb_cl_auto_ptr &cl_ptr,
 
   {
     // TODO: improve performence
-    std::pair<std::multimap<std::string, sdb_cl_auto_ptr>::iterator,
-              std::multimap<std::string, sdb_cl_auto_ptr>::iterator>
+    std::pair<std::multimap<std::string, Sdb_cl_auto_ptr>::iterator,
+              std::multimap<std::string, Sdb_cl_auto_ptr>::iterator>
         ret;
-    sdb_rw_lock_r r_lock(&rw_mutex);
+    Sdb_rw_lock_r r_lock(&rw_mutex);
     ret = cl_list.equal_range(str_tmp);
     iter = ret.first;
     while (iter != ret.second) {
@@ -165,14 +165,14 @@ int sdb_conn::get_cl(char *cs_name, char *cl_name, sdb_cl_auto_ptr &cl_ptr,
   }
 
   {
-    sdb_cl_auto_ptr tmp_cl(new sdb_cl());
+    Sdb_cl_auto_ptr tmp_cl(new Sdb_cl());
     rc = tmp_cl->init(this, cs_name, cl_name, create, options);
     if (rc != SDB_ERR_OK) {
       goto error;
     }
     cl_ptr = tmp_cl;
-    sdb_rw_lock_w w_lock(&rw_mutex);
-    cl_list.insert(std::pair<std::string, sdb_cl_auto_ptr>(str_tmp, cl_ptr));
+    Sdb_rw_lock_w w_lock(&rw_mutex);
+    cl_list.insert(std::pair<std::string, Sdb_cl_auto_ptr>(str_tmp, cl_ptr));
   }
 done:
   return rc;
@@ -184,7 +184,7 @@ error:
   goto done;
 }
 
-int sdb_conn::create_cl(char *cs_name, char *cl_name, sdb_cl_auto_ptr &cl_ptr,
+int Sdb_conn::create_cl(char *cs_name, char *cl_name, Sdb_cl_auto_ptr &cl_ptr,
                         const bson::BSONObj &options) {
   int rc = SDB_ERR_OK;
   rc = this->get_cl(cs_name, cl_name, cl_ptr, TRUE, options);
@@ -201,7 +201,7 @@ error:
   goto done;
 }
 
-int sdb_conn::drop_cs(char *cs_name) {
+int Sdb_conn::drop_cs(char *cs_name) {
   int rc = SDB_ERR_OK;
   rc = connection.dropCollectionSpace(cs_name);
   if (rc != SDB_ERR_OK) {
@@ -217,16 +217,16 @@ error:
   goto done;
 }
 
-void sdb_conn::clear_cl(char *cs_name, char *cl_name) {
-  std::map<std::string, sdb_cl_auto_ptr>::iterator iter;
+void Sdb_conn::clear_cl(char *cs_name, char *cl_name) {
+  std::map<std::string, Sdb_cl_auto_ptr>::iterator iter;
   std::string str_tmp(cs_name);
   str_tmp.append(".");
   str_tmp.append(cl_name);
 
   {
-    sdb_rw_lock_w w_lock(&rw_mutex);
-    std::pair<std::multimap<std::string, sdb_cl_auto_ptr>::iterator,
-              std::multimap<std::string, sdb_cl_auto_ptr>::iterator>
+    Sdb_rw_lock_w w_lock(&rw_mutex);
+    std::pair<std::multimap<std::string, Sdb_cl_auto_ptr>::iterator,
+              std::multimap<std::string, Sdb_cl_auto_ptr>::iterator>
         ret;
     ret = cl_list.equal_range(str_tmp);
     iter = ret.first;
@@ -240,9 +240,9 @@ void sdb_conn::clear_cl(char *cs_name, char *cl_name) {
   }
 }
 
-void sdb_conn::clear_all_cl() {
-  std::map<std::string, sdb_cl_auto_ptr>::iterator iter;
-  sdb_rw_lock_w w_lock(&rw_mutex);
+void Sdb_conn::clear_all_cl() {
+  std::map<std::string, Sdb_cl_auto_ptr>::iterator iter;
+  Sdb_rw_lock_w w_lock(&rw_mutex);
   iter = cl_list.begin();
   while (iter != cl_list.end()) {
     assert(iter->second.ref() == 1);
@@ -250,9 +250,9 @@ void sdb_conn::clear_all_cl() {
   }
 }
 
-bool sdb_conn::is_idle() {
-  std::map<std::string, sdb_cl_auto_ptr>::iterator iter;
-  sdb_rw_lock_r r_lock(&rw_mutex);
+bool Sdb_conn::is_idle() {
+  std::map<std::string, Sdb_cl_auto_ptr>::iterator iter;
+  Sdb_rw_lock_r r_lock(&rw_mutex);
   iter = cl_list.begin();
   while (iter != cl_list.end()) {
     if (iter->second.ref() > 1) {
@@ -263,7 +263,7 @@ bool sdb_conn::is_idle() {
   return TRUE;
 }
 
-int sdb_conn::create_global_domain(const char *domain_name) {
+int Sdb_conn::create_global_domain(const char *domain_name) {
   int rc = SDB_ERR_OK;
   sdbclient::sdbDomain domain;
   sdbclient::sdbCursor cursor;
@@ -322,7 +322,7 @@ error:
   goto done;
 }
 
-int sdb_conn::create_global_domain_cs(const char *domain_name, char *cs_name) {
+int Sdb_conn::create_global_domain_cs(const char *domain_name, char *cs_name) {
   int rc = SDB_ERR_OK;
   sdbclient::sdbCollectionSpace cs;
   bson::BSONObj options;
@@ -362,13 +362,13 @@ error:
   goto done;
 }
 
-sdb_conn_ref_ptr::sdb_conn_ref_ptr(sdb_conn *connection) {
+Sdb_conn_ref_ptr::Sdb_conn_ref_ptr(Sdb_conn *connection) {
   DBUG_ASSERT(connection != NULL);
   sdb_connection = connection;
   ref = 1;
 }
 
-sdb_conn_ref_ptr::~sdb_conn_ref_ptr() {
+Sdb_conn_ref_ptr::~Sdb_conn_ref_ptr() {
   if (sdb_connection) {
     delete sdb_connection;
     sdb_connection = NULL;
@@ -376,24 +376,24 @@ sdb_conn_ref_ptr::~sdb_conn_ref_ptr() {
   ref = 0;
 }
 
-sdb_conn_auto_ptr::sdb_conn_auto_ptr() : ref_ptr(NULL) {}
+Sdb_conn_auto_ptr::Sdb_conn_auto_ptr() : ref_ptr(NULL) {}
 
-sdb_conn_auto_ptr::sdb_conn_auto_ptr(sdb_conn *connection) {
-  ref_ptr = new sdb_conn_ref_ptr(connection);
+Sdb_conn_auto_ptr::Sdb_conn_auto_ptr(Sdb_conn *connection) {
+  ref_ptr = new Sdb_conn_ref_ptr(connection);
 }
 
-sdb_conn_auto_ptr::sdb_conn_auto_ptr(const sdb_conn_auto_ptr &other) {
+Sdb_conn_auto_ptr::Sdb_conn_auto_ptr(const Sdb_conn_auto_ptr &other) {
   this->ref_ptr = other.ref_ptr;
   if (ref_ptr) {
     ref_ptr->ref.atomic_add(1);
   }
 }
 
-sdb_conn_auto_ptr::~sdb_conn_auto_ptr() {
+Sdb_conn_auto_ptr::~Sdb_conn_auto_ptr() {
   clear();
 }
 
-void sdb_conn_auto_ptr::clear() {
+void Sdb_conn_auto_ptr::clear() {
   int ref_tmp = 0;
   if (NULL == ref_ptr) {
     goto done;
@@ -418,7 +418,7 @@ done:
   return;
 }
 
-sdb_conn_auto_ptr &sdb_conn_auto_ptr::operator=(sdb_conn_auto_ptr &other) {
+Sdb_conn_auto_ptr &Sdb_conn_auto_ptr::operator=(Sdb_conn_auto_ptr &other) {
   clear();
   this->ref_ptr = other.ref_ptr;
   DBUG_ASSERT(ref_ptr != NULL);
@@ -427,15 +427,15 @@ sdb_conn_auto_ptr &sdb_conn_auto_ptr::operator=(sdb_conn_auto_ptr &other) {
   return *this;
 }
 
-sdb_conn &sdb_conn_auto_ptr::operator*() {
+Sdb_conn &Sdb_conn_auto_ptr::operator*() {
   return *ref_ptr->sdb_connection;
 }
 
-sdb_conn *sdb_conn_auto_ptr::operator->() {
+Sdb_conn *Sdb_conn_auto_ptr::operator->() {
   return ref_ptr->sdb_connection;
 }
 
-int sdb_conn_auto_ptr::ref() {
+int Sdb_conn_auto_ptr::ref() {
   if (ref_ptr) {
     return ref_ptr->ref.atomic_get();
   }

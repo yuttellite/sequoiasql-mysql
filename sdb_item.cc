@@ -23,7 +23,7 @@
 #include "sdb_util.h"
 #include "sdb_def.h"
 
-int sdb_logic_item::push(sdb_item *cond_item) {
+int Sdb_logic_item::push(Sdb_item *cond_item) {
   int rc = 0;
   bson::BSONObj obj_tmp;
 
@@ -52,7 +52,7 @@ error:
   goto done;
 }
 
-int sdb_logic_item::push(Item *cond_item) {
+int Sdb_logic_item::push(Item *cond_item) {
   if (NULL != cond_item) {
     return SDB_ERR_COND_UNEXPECTED_ITEM;
   }
@@ -60,7 +60,7 @@ int sdb_logic_item::push(Item *cond_item) {
   return SDB_ERR_OK;
 }
 
-int sdb_logic_item::to_bson(bson::BSONObj &obj) {
+int Sdb_logic_item::to_bson(bson::BSONObj &obj) {
   int rc = SDB_ERR_OK;
   if (is_ok) {
     obj = BSON(this->name() << children.arr());
@@ -70,17 +70,17 @@ int sdb_logic_item::to_bson(bson::BSONObj &obj) {
   return rc;
 }
 
-int sdb_and_item::to_bson(bson::BSONObj &obj) {
+int Sdb_and_item::to_bson(bson::BSONObj &obj) {
   obj = BSON(this->name() << children.arr());
   return SDB_ERR_OK;
 }
 
-sdb_func_item::sdb_func_item() : para_num_cur(0), para_num_max(1) {
+Sdb_func_item::Sdb_func_item() : para_num_cur(0), para_num_max(1) {
   l_child = NULL;
   r_child = NULL;
 }
 
-sdb_func_item::~sdb_func_item() {
+Sdb_func_item::~Sdb_func_item() {
   para_list.pop();
   if (l_child != NULL) {
     delete l_child;
@@ -92,21 +92,21 @@ sdb_func_item::~sdb_func_item() {
   }
 }
 
-void sdb_func_item::update_stat() {
+void Sdb_func_item::update_stat() {
   if (++para_num_cur >= para_num_max) {
     is_finished = TRUE;
   }
 }
 
-int sdb_func_item::push(sdb_item *cond_item) {
+int Sdb_func_item::push(Sdb_item *cond_item) {
   int rc = SDB_ERR_OK;
   if (cond_item->type() != Item_func::UNKNOWN_FUNC) {
     rc = SDB_ERR_COND_UNEXPECTED_ITEM;
     goto error;
   }
 
-  if (((sdb_func_unkown *)cond_item)->get_func_item()->const_item()) {
-    rc = push(((sdb_func_unkown *)cond_item)->get_func_item());
+  if (((Sdb_func_unkown *)cond_item)->get_func_item()->const_item()) {
+    rc = push(((Sdb_func_unkown *)cond_item)->get_func_item());
     if (rc != SDB_ERR_OK) {
       goto error;
     }
@@ -129,7 +129,7 @@ error:
   goto done;
 }
 
-int sdb_func_item::push(Item *cond_item) {
+int Sdb_func_item::push(Item *cond_item) {
   int rc = SDB_ERR_OK;
 
   if (is_finished) {
@@ -144,7 +144,7 @@ error:
   goto done;
 }
 
-int sdb_func_item::pop(Item *&para_item) {
+int Sdb_func_item::pop(Item *&para_item) {
   if (para_list.is_empty()) {
     return SDB_ERR_EOF;
   }
@@ -152,7 +152,7 @@ int sdb_func_item::pop(Item *&para_item) {
   return SDB_ERR_OK;
 }
 
-/*int sdb_func_item::get_item_val( const char *field_name,
+/*int Sdb_func_item::get_item_val( const char *field_name,
                                 Item *item_val,
                                 Field *field,
                                 bson::BSONObj & obj,
@@ -336,7 +336,7 @@ error:
    goto done ;
 }*/
 
-int sdb_func_item::get_item_val(const char *field_name, Item *item_val,
+int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
                                 Field *field, bson::BSONObj &obj,
                                 bson::BSONArrayBuilder *arr_builder) {
   int rc = SDB_ERR_OK;
@@ -643,7 +643,7 @@ error:
   goto done;
 }
 
-sdb_func_unkown::sdb_func_unkown(Item_func *item) {
+Sdb_func_unkown::Sdb_func_unkown(Item_func *item) {
   func_item = item;
   para_num_max = item->argument_count();
   if (0 == para_num_max) {
@@ -651,19 +651,19 @@ sdb_func_unkown::sdb_func_unkown(Item_func *item) {
   }
 }
 
-sdb_func_unkown::~sdb_func_unkown() {}
+Sdb_func_unkown::~Sdb_func_unkown() {}
 
-sdb_func_unary_op::sdb_func_unary_op() {
+Sdb_func_unary_op::Sdb_func_unary_op() {
   para_num_max = 1;
 }
 
-sdb_func_unary_op::~sdb_func_unary_op() {}
+Sdb_func_unary_op::~Sdb_func_unary_op() {}
 
-sdb_func_isnull::sdb_func_isnull() {}
+Sdb_func_isnull::Sdb_func_isnull() {}
 
-sdb_func_isnull::~sdb_func_isnull() {}
+Sdb_func_isnull::~Sdb_func_isnull() {}
 
-int sdb_func_isnull::to_bson(bson::BSONObj &obj) {
+int Sdb_func_isnull::to_bson(bson::BSONObj &obj) {
   int rc = SDB_ERR_OK;
   Item *item_tmp = NULL;
 
@@ -690,11 +690,11 @@ error:
   goto done;
 }
 
-sdb_func_isnotnull::sdb_func_isnotnull() {}
+Sdb_func_isnotnull::Sdb_func_isnotnull() {}
 
-sdb_func_isnotnull::~sdb_func_isnotnull() {}
+Sdb_func_isnotnull::~Sdb_func_isnotnull() {}
 
-int sdb_func_isnotnull::to_bson(bson::BSONObj &obj) {
+int Sdb_func_isnotnull::to_bson(bson::BSONObj &obj) {
   int rc = SDB_ERR_OK;
   Item *item_tmp = NULL;
 
@@ -716,22 +716,22 @@ error:
   goto done;
 }
 
-sdb_func_bin_op::sdb_func_bin_op() {
+Sdb_func_bin_op::Sdb_func_bin_op() {
   para_num_max = 2;
 }
 
-sdb_func_bin_op::~sdb_func_bin_op() {}
+Sdb_func_bin_op::~Sdb_func_bin_op() {}
 
-sdb_func_cmp::sdb_func_cmp() {}
+Sdb_func_cmp::Sdb_func_cmp() {}
 
-sdb_func_cmp::~sdb_func_cmp() {}
+Sdb_func_cmp::~Sdb_func_cmp() {}
 
-int sdb_func_cmp::to_bson_with_child(bson::BSONObj &obj) {
+int Sdb_func_cmp::to_bson_with_child(bson::BSONObj &obj) {
   int rc = SDB_ERR_OK;
-  sdb_item *child = NULL;
+  Sdb_item *child = NULL;
   Item *field1 = NULL, *field2 = NULL, *field3 = NULL, *item_tmp;
   Item_func *func = NULL;
-  sdb_func_unkown *sdb_func = NULL;
+  Sdb_func_unkown *sdb_func = NULL;
   bool cmp_inverse = FALSE;
   bson::BSONObj obj_tmp;
   bson::BSONObjBuilder builder_tmp;
@@ -744,12 +744,12 @@ int sdb_func_cmp::to_bson_with_child(bson::BSONObj &obj) {
   }
 
   if (child->type() != Item_func::UNKNOWN_FUNC || !child->finished() ||
-      ((sdb_func_item *)child)->get_para_num() != 2 ||
+      ((Sdb_func_item *)child)->get_para_num() != 2 ||
       this->get_para_num() != 2) {
     rc = SDB_ERR_COND_UNEXPECTED_ITEM;
     goto error;
   }
-  sdb_func = (sdb_func_unkown *)child;
+  sdb_func = (Sdb_func_unkown *)child;
   item_tmp = sdb_func->get_func_item();
   if (item_tmp->type() != Item::FUNC_ITEM) {
     rc = SDB_ERR_COND_UNEXPECTED_ITEM;
@@ -948,7 +948,7 @@ error:
   goto done;
 }
 
-int sdb_func_cmp::to_bson(bson::BSONObj &obj) {
+int Sdb_func_cmp::to_bson(bson::BSONObj &obj) {
   int rc = SDB_ERR_OK;
   bool inverse = FALSE;
   bool cmp_with_field = FALSE;
@@ -1035,13 +1035,13 @@ error:
   goto done;
 }
 
-sdb_func_between::sdb_func_between(bool has_not) : sdb_func_neg(has_not) {
+Sdb_func_between::Sdb_func_between(bool has_not) : Sdb_func_neg(has_not) {
   para_num_max = 3;
 }
 
-sdb_func_between::~sdb_func_between() {}
+Sdb_func_between::~Sdb_func_between() {}
 
-int sdb_func_between::to_bson(bson::BSONObj &obj) {
+int Sdb_func_between::to_bson(bson::BSONObj &obj) {
   int rc = SDB_ERR_OK;
   Item_field *item_field = NULL;
   Item *item_start = NULL, *item_end = NULL, *item_tmp = NULL;
@@ -1112,13 +1112,13 @@ error:
   goto done;
 }
 
-sdb_func_in::sdb_func_in(bool has_not, uint args_num) : sdb_func_neg(has_not) {
+Sdb_func_in::Sdb_func_in(bool has_not, uint args_num) : Sdb_func_neg(has_not) {
   para_num_max = args_num;
 }
 
-sdb_func_in::~sdb_func_in() {}
+Sdb_func_in::~Sdb_func_in() {}
 
-int sdb_func_in::to_bson(bson::BSONObj &obj) {
+int Sdb_func_in::to_bson(bson::BSONObj &obj) {
   int rc = SDB_ERR_OK;
   Item_field *item_field = NULL;
   Item *item_tmp = NULL;
@@ -1165,11 +1165,11 @@ error:
   goto done;
 }
 
-sdb_func_like::sdb_func_like(Item_func_like *item) : like_item(item) {}
+Sdb_func_like::Sdb_func_like(Item_func_like *item) : like_item(item) {}
 
-sdb_func_like::~sdb_func_like() {}
+Sdb_func_like::~Sdb_func_like() {}
 
-int sdb_func_like::to_bson(bson::BSONObj &obj) {
+int Sdb_func_like::to_bson(bson::BSONObj &obj) {
   int rc = SDB_ERR_OK;
   Item_field *item_field = NULL;
   Item *item_tmp = NULL;
@@ -1252,7 +1252,7 @@ error:
   goto done;
 }
 
-int sdb_func_like::get_regex_str(const char *like_str, size_t len,
+int Sdb_func_like::get_regex_str(const char *like_str, size_t len,
                                  std::string &regex_str) {
   int rc = SDB_ERR_OK;
   const char *p_prev, *p_cur, *p_begin, *p_end, *p_last;

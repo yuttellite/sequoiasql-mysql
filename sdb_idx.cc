@@ -133,7 +133,7 @@ BOOLEAN is_field_indexable(const Field *field) {
   }
 }
 
-int sdb_create_index(const KEY *keyInfo, sdb_cl_auto_ptr cl) {
+int sdb_create_index(const KEY *keyInfo, Sdb_cl_auto_ptr cl) {
   const KEY_PART_INFO *keyPart;
   const KEY_PART_INFO *keyEnd;
   int rc = 0;
@@ -175,7 +175,7 @@ error:
   goto done;
 }
 
-int sdb_drop_index(const KEY *keyInfo, sdb_cl_auto_ptr cl) {
+int sdb_drop_index(const KEY *keyInfo, Sdb_cl_auto_ptr cl) {
   int rc = 0;
   rc = cl->drop_index(keyInfo->name);
   if (rc) {

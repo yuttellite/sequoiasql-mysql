@@ -19,12 +19,12 @@
 #include "sdb_def.h"
 #include "sdb_cl_ptr.h"
 
-typedef struct st_sdb_share {
+struct Sdb_share {
   char *table_name;
   uint table_name_length, use_count;
   mysql_mutex_t mutex;
   THR_LOCK lock;
-} SDB_SHARE;
+};
 
 class ha_sdb : public handler {
  public:
@@ -262,16 +262,16 @@ class ha_sdb : public handler {
 
  private:
   THR_LOCK_DATA lock_data;
-  sdb_conn_auto_ptr connection;
-  sdb_cl_auto_ptr cl;
+  Sdb_conn_auto_ptr connection;
+  Sdb_cl_auto_ptr cl;
   bool first_read;
   bson::BSONObj cur_rec;
   bson::BSONObj condition;
   int keynr;        // use for index_scan
   String conv_str;  // use for converting charset
-  SDB_SHARE *share;
-  char db_name[CS_NAME_MAX_SIZE + 1];
-  char table_name[CL_NAME_MAX_SIZE + 1];
+  Sdb_share *share;
+  char db_name[SDB_CS_NAME_MAX_SIZE + 1];
+  char table_name[SDB_CL_NAME_MAX_SIZE + 1];
   int fd;
   time_t last_flush_time;
   int used_times;

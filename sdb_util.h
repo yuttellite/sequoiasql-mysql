@@ -30,37 +30,37 @@ int sdb_get_db_name_from_path(const char *path, char *db_name,
 int sdb_convert_charset(const String &src_str, String &dst_str,
                         const CHARSET_INFO *dst_charset);
 
-class sdb_lock_time_out {
+class Sdb_lock_time_out {
  public:
-  ~sdb_lock_time_out() {}
+  ~Sdb_lock_time_out() {}
 
-  static sdb_lock_time_out *get_instance() {
-    static sdb_lock_time_out _time_out;
+  static Sdb_lock_time_out *get_instance() {
+    static Sdb_lock_time_out _time_out;
     return &_time_out;
   }
 
   const struct timespec *get_time() { return &time_out; }
 
  private:
-  sdb_lock_time_out() {
+  Sdb_lock_time_out() {
     clock_gettime(CLOCK_REALTIME, &time_out);
     time_out.tv_sec += 3600 * 24 * 365 * 10;
   }
-  sdb_lock_time_out(const sdb_lock_time_out &rh) {}
-  sdb_lock_time_out &operator=(const sdb_lock_time_out &rh) { return *this; }
+  Sdb_lock_time_out(const Sdb_lock_time_out &rh) {}
+  Sdb_lock_time_out &operator=(const Sdb_lock_time_out &rh) { return *this; }
 
  private:
   struct timespec time_out;
 };
 
-#define SDB_LOCK_TIMEOUT sdb_lock_time_out::get_instance()->get_time()
+#define SDB_LOCK_TIMEOUT Sdb_lock_time_out::get_instance()->get_time()
 
-class sdb_rw_lock_r {
+class Sdb_rw_lock_r {
  private:
   pthread_rwlock_t *rw_mutex;
 
  public:
-  sdb_rw_lock_r(pthread_rwlock_t *var_lock) : rw_mutex(NULL) {
+  Sdb_rw_lock_r(pthread_rwlock_t *var_lock) : rw_mutex(NULL) {
     if (var_lock) {
       while (TRUE) {
         int rc = pthread_rwlock_timedrdlock(var_lock, SDB_LOCK_TIMEOUT);
@@ -76,19 +76,19 @@ class sdb_rw_lock_r {
     }
   }
 
-  ~sdb_rw_lock_r() {
+  ~Sdb_rw_lock_r() {
     if (rw_mutex) {
       pthread_rwlock_unlock(rw_mutex);
     }
   }
 };
 
-class sdb_rw_lock_w {
+class Sdb_rw_lock_w {
  private:
   pthread_rwlock_t *rw_mutex;
 
  public:
-  sdb_rw_lock_w(pthread_rwlock_t *var_lock) : rw_mutex(NULL) {
+  Sdb_rw_lock_w(pthread_rwlock_t *var_lock) : rw_mutex(NULL) {
     if (var_lock) {
       while (TRUE) {
         int rc = pthread_rwlock_timedwrlock(var_lock, SDB_LOCK_TIMEOUT);
@@ -104,7 +104,7 @@ class sdb_rw_lock_w {
     }
   }
 
-  ~sdb_rw_lock_w() {
+  ~Sdb_rw_lock_w() {
     if (rw_mutex) {
       pthread_rwlock_unlock(this->rw_mutex);
     }

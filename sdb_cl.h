@@ -21,14 +21,15 @@
 #include "sdb_def.h"
 #include "sdb_conn_ptr.h"
 
-class sdb_conn_auto_ptr;
-class sdb_cl {
+class Sdb_conn_auto_ptr;
+
+class Sdb_cl {
  public:
-  sdb_cl();
+  Sdb_cl();
 
-  ~sdb_cl();
+  ~Sdb_cl();
 
-  int init(sdb_conn *connection, char *cs, char *cl, bool create = FALSE,
+  int init(Sdb_conn *connection, char *cs, char *cl, bool create = FALSE,
            const bson::BSONObj &options = sdbclient::_sdbStaticObject);
 
   int re_init(bool create = FALSE,
@@ -99,10 +100,10 @@ class sdb_cl {
   int check_connect(int rc);
 
  private:
-  sdb_conn *p_conn;
+  Sdb_conn *p_conn;
   sdbclient::sdbCollection cl;
   sdbclient::sdbCursor cursor;
-  char cs_name[CS_NAME_MAX_SIZE + 1];
-  char cl_name[CL_NAME_MAX_SIZE + 1];
+  char cs_name[SDB_CS_NAME_MAX_SIZE + 1];
+  char cl_name[SDB_CL_NAME_MAX_SIZE + 1];
 };
 #endif

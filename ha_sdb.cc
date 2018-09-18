@@ -58,14 +58,14 @@ static HASH sdb_open_tables;
 static PSI_memory_key key_memory_sdb_share;
 static PSI_memory_key sdb_key_memory_blobroot;
 
-static uchar *sdb_get_key(SDB_SHARE *share, size_t *length,
+static uchar *sdb_get_key(Sdb_share *share, size_t *length,
                           my_bool not_used MY_ATTRIBUTE((unused))) {
   *length = share->table_name_length;
   return (uchar *)share->table_name;
 }
 
-static SDB_SHARE *get_sdb_share(const char *table_name, TABLE *table) {
-  SDB_SHARE *share = NULL;
+static Sdb_share *get_sdb_share(const char *table_name, TABLE *table) {
+  Sdb_share *share = NULL;
   char *tmp_name = NULL;
   uint length;
 
@@ -77,7 +77,7 @@ static SDB_SHARE *get_sdb_share(const char *table_name, TABLE *table) {
    initialize its members.
   */
 
-  if (!(share = (SDB_SHARE *)my_hash_search(&sdb_open_tables,
+  if (!(share = (Sdb_share *)my_hash_search(&sdb_open_tables,
                                             (uchar *)table_name, length))) {
     if (!my_multi_malloc(key_memory_sdb_share, MYF(MY_WME | MY_ZEROFILL),
                          &share, sizeof(*share), &tmp_name, length + 1,
@@ -111,7 +111,7 @@ error:
   goto done;
 }
 
-static int free_sdb_share(SDB_SHARE *share) {
+static int free_sdb_share(Sdb_share *share) {
   mysql_mutex_lock(&sdb_mutex);
   if (!--share->use_count) {
     my_hash_delete(&sdb_open_tables, (uchar *)share);
@@ -130,8 +130,8 @@ ha_sdb::ha_sdb(handlerton *hton, TABLE_SHARE *table_arg)
   share = NULL;
   first_read = TRUE;
   used_times = 0;
-  memset(db_name, 0, CS_NAME_MAX_SIZE + 1);
-  memset(table_name, 0, CL_NAME_MAX_SIZE + 1);
+  memset(db_name, 0, SDB_CS_NAME_MAX_SIZE + 1);
+  memset(table_name, 0, SDB_CL_NAME_MAX_SIZE + 1);
   init_alloc_root(sdb_key_memory_blobroot, &blobroot, 8 * 1024, 0);
 }
 
@@ -190,8 +190,8 @@ int ha_sdb::open(const char *name, int mode, uint test_if_locked) {
     goto error;
   }
 
-  rc = sdb_parse_table_name(name, db_name, CS_NAME_MAX_SIZE + 1, table_name,
-                            CL_NAME_MAX_SIZE + 1);
+  rc = sdb_parse_table_name(name, db_name, SDB_CS_NAME_MAX_SIZE + 1, table_name,
+                            SDB_CL_NAME_MAX_SIZE + 1);
   if (rc != 0) {
     SDB_LOG_ERROR("Table name[%s] can't be parsed. rc: %d", name, rc);
     goto error;
@@ -999,7 +999,7 @@ void ha_sdb::check_thread() {
   {
     // first_read = TRUE ;
     // stats.records= 0;
-    sdb_conn_auto_ptr conn_tmp;
+    Sdb_conn_auto_ptr conn_tmp;
     rc = SDB_CONN_MGR_INST->get_sdb_conn(ha_thd()->thread_id(), conn_tmp);
     // rc = SDB_CONN_MGR_INST->get_sdb_conn(
     // (my_thread_id)(ha_thd()->active_vio->mysql_socket.fd),
@@ -1243,10 +1243,10 @@ ha_rows ha_sdb::records_in_range(uint inx, key_range *min_key,
 
 int ha_sdb::delete_table(const char *from) {
   int rc = 0;
-  sdb_conn_auto_ptr conn_tmp;
+  Sdb_conn_auto_ptr conn_tmp;
 
-  rc = sdb_parse_table_name(from, db_name, CS_NAME_MAX_SIZE + 1, table_name,
-                            CL_NAME_MAX_SIZE + 1);
+  rc = sdb_parse_table_name(from, db_name, SDB_CS_NAME_MAX_SIZE + 1, table_name,
+                            SDB_CL_NAME_MAX_SIZE + 1);
   if (rc != 0) {
     goto error;
   }
@@ -1423,7 +1423,7 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
   int rc = 0;
   sdbCollectionSpace cs;
   uint str_field_len = 0;
-  sdb_conn_auto_ptr conn_tmp;
+  Sdb_conn_auto_ptr conn_tmp;
   bson::BSONObj options;
   bson::BSONObj comments;
   my_bool use_partition = sdb_use_partition;
@@ -1455,8 +1455,8 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
     }
   }
 
-  rc = sdb_parse_table_name(name, db_name, CS_NAME_MAX_SIZE + 1, table_name,
-                            CL_NAME_MAX_SIZE + 1);
+  rc = sdb_parse_table_name(name, db_name, SDB_CS_NAME_MAX_SIZE + 1, table_name,
+                            SDB_CL_NAME_MAX_SIZE + 1);
   if (0 != rc) {
     goto error;
   }
@@ -1550,7 +1550,7 @@ void ha_sdb::unlock_row() {
 
 const Item *ha_sdb::cond_push(const Item *cond) {
   const Item *remain_cond = cond;
-  sdb_cond_ctx sdb_condition;
+  Sdb_cond_ctx sdb_condition;
   if (cond->used_tables() & ~table->pos_in_table_list->map()) {
     goto done;
   }
@@ -1561,10 +1561,10 @@ const Item *ha_sdb::cond_push(const Item *cond) {
   } catch (bson::assertion e) {
     SDB_LOG_DEBUG("Exception[%s] occurs when build bson obj.", e.full.c_str());
     DBUG_ASSERT(0);
-    sdb_condition.status = sdb_cond_unsupported;
+    sdb_condition.status = SDB_COND_UNSUPPORTED;
   }
 
-  if (sdb_cond_supported == sdb_condition.status) {
+  if (SDB_COND_SUPPORTED == sdb_condition.status) {
     // TODO: build unanalysable condition
     remain_cond = NULL;
   } else {
@@ -1598,12 +1598,12 @@ static handler *sdb_create_handler(handlerton *hton, TABLE_SHARE *table,
 #ifdef HAVE_PSI_INTERFACE
 
 static PSI_memory_info all_sdb_memory[] = {
-    {&key_memory_sdb_share, "SDB_SHARE", PSI_FLAG_GLOBAL},
+    {&key_memory_sdb_share, "Sdb_share", PSI_FLAG_GLOBAL},
     {&sdb_key_memory_blobroot, "blobroot", 0}};
 
 static PSI_mutex_info all_sdb_mutexes[] = {
     {&key_mutex_sdb, "sdb", PSI_FLAG_GLOBAL},
-    {&key_mutex_SDB_SHARE_mutex, "SDB_SHARE::mutex", 0}};
+    {&key_mutex_SDB_SHARE_mutex, "Sdb_share::mutex", 0}};
 
 static void init_sdb_psi_keys(void) {
   const char *category = "sequoiadb";
@@ -1628,7 +1628,7 @@ static int sdb_commit(
 {
   int rc = 0;
 
-  sdb_conn_auto_ptr connection;
+  Sdb_conn_auto_ptr connection;
 
   if (!commit_trx) {
     goto done;
@@ -1665,7 +1665,7 @@ static int sdb_rollback(
 {
   int rc = 0;
 
-  sdb_conn_auto_ptr connection;
+  Sdb_conn_auto_ptr connection;
 
   if (!rollback_trx) {
     goto done;
@@ -1694,8 +1694,8 @@ error:
 
 static void sdb_drop_database(handlerton *hton, char *path) {
   int rc = 0;
-  char db_name[CS_NAME_MAX_SIZE + 1] = {0};
-  sdb_conn_auto_ptr connection;
+  char db_name[SDB_CS_NAME_MAX_SIZE + 1] = {0};
+  Sdb_conn_auto_ptr connection;
   THD *thd = current_thd;
   if (NULL == thd) {
     goto error;
@@ -1706,7 +1706,7 @@ static void sdb_drop_database(handlerton *hton, char *path) {
     goto error;
   }
 
-  rc = sdb_get_db_name_from_path(path, db_name, CS_NAME_MAX_SIZE + 1);
+  rc = sdb_get_db_name_from_path(path, db_name, SDB_CS_NAME_MAX_SIZE + 1);
   if (rc != 0) {
     goto error;
   }
@@ -1724,7 +1724,7 @@ error:
 
 static int sdb_init_func(void *p) {
   handlerton *sdb_hton;
-  sdb_conn_addrs conn_addrs;
+  Sdb_conn_addrs conn_addrs;
 #ifdef HAVE_PSI_INTERFACE
   init_sdb_psi_keys();
 #endif

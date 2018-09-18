@@ -47,17 +47,17 @@ struct st_mysql_sys_var *sdb_sys_vars[] = {MYSQL_SYSVAR(conn_addr),
                                            MYSQL_SYSVAR(use_partition),
                                            MYSQL_SYSVAR(debug_log), NULL};
 
-sdb_conn_addrs::sdb_conn_addrs() : conn_num(0) {
+Sdb_conn_addrs::Sdb_conn_addrs() : conn_num(0) {
   for (int i = 0; i < SDB_COORD_NUM_MAX; i++) {
     addrs[i] = NULL;
   }
 }
 
-sdb_conn_addrs::~sdb_conn_addrs() {
+Sdb_conn_addrs::~Sdb_conn_addrs() {
   clear_conn_addrs();
 }
 
-void sdb_conn_addrs::clear_conn_addrs() {
+void Sdb_conn_addrs::clear_conn_addrs() {
   for (int i = 0; i < conn_num; i++) {
     if (addrs[i]) {
       free(addrs[i]);
@@ -67,7 +67,7 @@ void sdb_conn_addrs::clear_conn_addrs() {
   conn_num = 0;
 }
 
-int sdb_conn_addrs::parse_conn_addrs(const char *conn_addr) {
+int Sdb_conn_addrs::parse_conn_addrs(const char *conn_addr) {
   int rc = 0;
   const char *p = conn_addr;
 
@@ -121,10 +121,10 @@ error:
   goto done;
 }
 
-const char **sdb_conn_addrs::get_conn_addrs() const {
+const char **Sdb_conn_addrs::get_conn_addrs() const {
   return (const char **)addrs;
 }
 
-int sdb_conn_addrs::get_conn_num() const {
+int Sdb_conn_addrs::get_conn_num() const {
   return conn_num;
 }

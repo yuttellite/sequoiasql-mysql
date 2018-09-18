@@ -18,20 +18,20 @@
 
 #include "sdb_item.h"
 
-enum sdb_cond_status {
-  sdb_cond_supported = 1,
-  sdb_cond_partsupported,
-  sdb_cond_beforesupported,
-  sdb_cond_unsupported,
+enum SDB_COND_STATUS {
+  SDB_COND_SUPPORTED = 1,
+  SDB_COND_PART_SUPPORTED,
+  SDB_COND_BEFORE_SUPPORTED,
+  SDB_COND_UNSUPPORTED,
 
-  sdb_cond_unknown = 65535
+  SDB_COND_UNKNOWN = 65535
 };
 
-class sdb_cond_ctx : public Sql_alloc {
+class Sdb_cond_ctx : public Sql_alloc {
  public:
-  sdb_cond_ctx();
+  Sdb_cond_ctx();
 
-  ~sdb_cond_ctx();
+  ~Sdb_cond_ctx();
 
   void push(Item *cond_item);
 
@@ -41,7 +41,7 @@ class sdb_cond_ctx : public Sql_alloc {
 
   void clear();
 
-  sdb_item *create_sdb_item(Item_func *cond_item);
+  Sdb_item *create_sdb_item(Item_func *cond_item);
 
   int to_bson(bson::BSONObj &obj);
 
@@ -49,11 +49,11 @@ class sdb_cond_ctx : public Sql_alloc {
 
   bool keep_on();
 
-  sdb_item *cur_item;
-  List<sdb_item> item_list;
-  sdb_cond_status status;
+  Sdb_item *cur_item;
+  List<Sdb_item> item_list;
+  SDB_COND_STATUS status;
 };
 
-void sdb_parse_condtion(const Item *cond_item, sdb_cond_ctx *sdb_cond);
+void sdb_parse_condtion(const Item *cond_item, Sdb_cond_ctx *sdb_cond);
 
 #endif

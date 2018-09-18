@@ -22,14 +22,14 @@
 #include <atomic_class.h>
 #include "client.hpp"
 
-class sdb_conn_auto_ptr;
-class sdb_cl_auto_ptr;
+class Sdb_conn_auto_ptr;
+class Sdb_cl_auto_ptr;
 
-class sdb_conn {
+class Sdb_conn {
  public:
-  sdb_conn(my_thread_id _tid);
+  Sdb_conn(my_thread_id _tid);
 
-  ~sdb_conn();
+  ~Sdb_conn();
 
   int connect();
 
@@ -45,11 +45,11 @@ class sdb_conn {
 
   bool is_transaction();
 
-  int get_cl(char *cs_name, char *cl_name, sdb_cl_auto_ptr &cl_ptr,
+  int get_cl(char *cs_name, char *cl_name, Sdb_cl_auto_ptr &cl_ptr,
              bool create = FALSE,
              const bson::BSONObj &options = sdbclient::_sdbStaticObject);
 
-  int create_cl(char *cs_name, char *cl_name, sdb_cl_auto_ptr &cl_ptr,
+  int create_cl(char *cs_name, char *cl_name, Sdb_cl_auto_ptr &cl_ptr,
                 const bson::BSONObj &options = sdbclient::_sdbStaticObject);
 
   int drop_cs(char *cs_name);
@@ -69,7 +69,7 @@ class sdb_conn {
   bool transactionon;
   my_thread_id tid;
   pthread_rwlock_t rw_mutex;
-  std::multimap<std::string, sdb_cl_auto_ptr> cl_list;
+  std::multimap<std::string, Sdb_cl_auto_ptr> cl_list;
 };
 
 #endif

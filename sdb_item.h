@@ -21,12 +21,12 @@
 #include <item_cmpfunc.h>
 #include "sdb_err_code.h"
 
-class sdb_item : public Sql_alloc {
+class Sdb_item : public Sql_alloc {
  public:
-  sdb_item() : is_finished(FALSE) {}
-  virtual ~sdb_item(){};
+  Sdb_item() : is_finished(FALSE) {}
+  virtual ~Sdb_item(){};
 
-  virtual int push(sdb_item *cond_item) { return SDB_ERR_COND_UNEXPECTED_ITEM; }
+  virtual int push(Sdb_item *cond_item) { return SDB_ERR_COND_UNEXPECTED_ITEM; }
   virtual int push(Item *cond_item) { return SDB_ERR_COND_UNEXPECTED_ITEM; }
   virtual int to_bson(bson::BSONObj &obj) = 0;
   virtual const char *name() = 0;
@@ -38,10 +38,10 @@ class sdb_item : public Sql_alloc {
   bool is_finished;
 };
 
-class sdb_logic_item : public sdb_item {
+class Sdb_logic_item : public Sdb_item {
  public:
-  sdb_logic_item() { is_ok = TRUE; }
-  virtual int push(sdb_item *cond_item);
+  Sdb_logic_item() { is_ok = TRUE; }
+  virtual int push(Sdb_item *cond_item);
   virtual int push(Item *cond_item);
   virtual int to_bson(bson::BSONObj &obj);
   virtual const char *name() = 0;
@@ -52,31 +52,31 @@ class sdb_logic_item : public sdb_item {
   bool is_ok;
 };
 
-class sdb_and_item : public sdb_logic_item {
+class Sdb_and_item : public Sdb_logic_item {
  public:
-  sdb_and_item() {}
-  virtual ~sdb_and_item() {}
+  Sdb_and_item() {}
+  virtual ~Sdb_and_item() {}
 
   virtual int to_bson(bson::BSONObj &obj);
   virtual Item_func::Functype type() { return Item_func::COND_AND_FUNC; }
   virtual const char *name() { return "$and"; }
 };
 
-class sdb_or_item : public sdb_logic_item {
+class Sdb_or_item : public Sdb_logic_item {
  public:
-  sdb_or_item() {}
-  virtual ~sdb_or_item() {}
+  Sdb_or_item() {}
+  virtual ~Sdb_or_item() {}
 
   virtual Item_func::Functype type() { return Item_func::COND_OR_FUNC; }
   virtual const char *name() { return "$or"; }
 };
 
-class sdb_func_item : public sdb_item {
+class Sdb_func_item : public Sdb_item {
  public:
-  sdb_func_item();
-  virtual ~sdb_func_item();
+  Sdb_func_item();
+  virtual ~Sdb_func_item();
 
-  virtual int push(sdb_item *cond_item);
+  virtual int push(Sdb_item *cond_item);
   virtual int push(Item *cond_item);
   virtual int pop(Item *&para_item);
   virtual void update_stat();
@@ -93,14 +93,14 @@ class sdb_func_item : public sdb_item {
   List<Item> para_list;
   uint para_num_cur;
   uint para_num_max;
-  sdb_item *l_child;
-  sdb_item *r_child;
+  Sdb_item *l_child;
+  Sdb_item *r_child;
 };
 
-class sdb_func_unkown : public sdb_func_item {
+class Sdb_func_unkown : public Sdb_func_item {
  public:
-  sdb_func_unkown(Item_func *item);
-  ~sdb_func_unkown();
+  Sdb_func_unkown(Item_func *item);
+  ~Sdb_func_unkown();
 
   virtual int to_bson(bson::BSONObj &obj) { return SDB_ERR_COND_UNKOWN_ITEM; }
   virtual const char *name() { return "unkown"; }
@@ -112,50 +112,50 @@ class sdb_func_unkown : public sdb_func_item {
   Item_func *func_item;
 };
 
-class sdb_func_unary_op : public sdb_func_item {
+class Sdb_func_unary_op : public Sdb_func_item {
  public:
-  sdb_func_unary_op();
-  ~sdb_func_unary_op();
+  Sdb_func_unary_op();
+  ~Sdb_func_unary_op();
 
   virtual int to_bson(bson::BSONObj &obj) = 0;
   virtual const char *name() = 0;
   virtual Item_func::Functype type() = 0;
 };
 
-class sdb_func_isnull : public sdb_func_unary_op {
+class Sdb_func_isnull : public Sdb_func_unary_op {
  public:
-  sdb_func_isnull();
-  ~sdb_func_isnull();
+  Sdb_func_isnull();
+  ~Sdb_func_isnull();
 
   virtual int to_bson(bson::BSONObj &obj);
   virtual const char *name() { return "$isnull"; }
   virtual Item_func::Functype type() { return Item_func::ISNULL_FUNC; }
 };
 
-class sdb_func_isnotnull : public sdb_func_unary_op {
+class Sdb_func_isnotnull : public Sdb_func_unary_op {
  public:
-  sdb_func_isnotnull();
-  ~sdb_func_isnotnull();
+  Sdb_func_isnotnull();
+  ~Sdb_func_isnotnull();
 
   virtual int to_bson(bson::BSONObj &obj);
   virtual const char *name() { return "$isnull"; }
   virtual Item_func::Functype type() { return Item_func::ISNOTNULL_FUNC; }
 };
 
-class sdb_func_bin_op : public sdb_func_item {
+class Sdb_func_bin_op : public Sdb_func_item {
  public:
-  sdb_func_bin_op();
-  ~sdb_func_bin_op();
+  Sdb_func_bin_op();
+  ~Sdb_func_bin_op();
 
   virtual int to_bson(bson::BSONObj &obj) = 0;
   virtual const char *name() = 0;
   virtual Item_func::Functype type() = 0;
 };
 
-class sdb_func_cmp : public sdb_func_bin_op {
+class Sdb_func_cmp : public Sdb_func_bin_op {
  public:
-  sdb_func_cmp();
-  ~sdb_func_cmp();
+  Sdb_func_cmp();
+  ~Sdb_func_cmp();
 
   virtual int to_bson(bson::BSONObj &obj);
   int to_bson_with_child(bson::BSONObj &obj);
@@ -164,10 +164,10 @@ class sdb_func_cmp : public sdb_func_bin_op {
   virtual Item_func::Functype type() = 0;
 };
 
-class sdb_func_eq : public sdb_func_cmp {
+class Sdb_func_eq : public Sdb_func_cmp {
  public:
-  sdb_func_eq(Item_func *item) : func_item(item){};
-  ~sdb_func_eq(){};
+  Sdb_func_eq(Item_func *item) : func_item(item){};
+  ~Sdb_func_eq(){};
 
   virtual const char *name() { return "$et"; }
   virtual const char *inverse_name() { return "$et"; }
@@ -177,60 +177,60 @@ class sdb_func_eq : public sdb_func_cmp {
   Item_func *func_item;
 };
 
-class sdb_func_ne : public sdb_func_cmp {
+class Sdb_func_ne : public Sdb_func_cmp {
  public:
-  sdb_func_ne(){};
-  ~sdb_func_ne(){};
+  Sdb_func_ne(){};
+  ~Sdb_func_ne(){};
 
   virtual const char *name() { return "$ne"; }
   virtual const char *inverse_name() { return "$ne"; }
   virtual Item_func::Functype type() { return Item_func::NE_FUNC; }
 };
 
-class sdb_func_lt : public sdb_func_cmp {
+class Sdb_func_lt : public Sdb_func_cmp {
  public:
-  sdb_func_lt(){};
-  ~sdb_func_lt(){};
+  Sdb_func_lt(){};
+  ~Sdb_func_lt(){};
 
   virtual const char *name() { return "$lt"; }
   virtual const char *inverse_name() { return "$gt"; }
   virtual Item_func::Functype type() { return Item_func::LT_FUNC; }
 };
 
-class sdb_func_le : public sdb_func_cmp {
+class Sdb_func_le : public Sdb_func_cmp {
  public:
-  sdb_func_le(){};
-  ~sdb_func_le(){};
+  Sdb_func_le(){};
+  ~Sdb_func_le(){};
 
   virtual const char *name() { return "$lte"; }
   virtual const char *inverse_name() { return "$gte"; }
   virtual Item_func::Functype type() { return Item_func::LE_FUNC; }
 };
 
-class sdb_func_gt : public sdb_func_cmp {
+class Sdb_func_gt : public Sdb_func_cmp {
  public:
-  sdb_func_gt(){};
-  ~sdb_func_gt(){};
+  Sdb_func_gt(){};
+  ~Sdb_func_gt(){};
 
   virtual const char *name() { return "$gt"; }
   virtual const char *inverse_name() { return "$lt"; }
   virtual Item_func::Functype type() { return Item_func::GT_FUNC; }
 };
 
-class sdb_func_ge : public sdb_func_cmp {
+class Sdb_func_ge : public Sdb_func_cmp {
  public:
-  sdb_func_ge(){};
-  ~sdb_func_ge(){};
+  Sdb_func_ge(){};
+  ~Sdb_func_ge(){};
 
   virtual const char *name() { return "$gte"; }
   virtual const char *inverse_name() { return "$lte"; }
   virtual Item_func::Functype type() { return Item_func::GE_FUNC; }
 };
 
-class sdb_func_neg : public sdb_func_item {
+class Sdb_func_neg : public Sdb_func_item {
  public:
-  sdb_func_neg(bool has_not) : negated(has_not) {}
-  virtual ~sdb_func_neg() {}
+  Sdb_func_neg(bool has_not) : negated(has_not) {}
+  virtual ~Sdb_func_neg() {}
 
   virtual int to_bson(bson::BSONObj &obj) = 0;
   virtual const char *name() { return "-"; }
@@ -240,33 +240,33 @@ class sdb_func_neg : public sdb_func_item {
   bool negated;
 };
 
-class sdb_func_between : public sdb_func_neg {
+class Sdb_func_between : public Sdb_func_neg {
  public:
-  sdb_func_between(bool has_not);
-  virtual ~sdb_func_between();
+  Sdb_func_between(bool has_not);
+  virtual ~Sdb_func_between();
 
   virtual int to_bson(bson::BSONObj &obj);
   virtual const char *name() { return "between"; }
   virtual Item_func::Functype type() { return Item_func::BETWEEN; }
 };
 
-class sdb_func_in : public sdb_func_neg {
+class Sdb_func_in : public Sdb_func_neg {
  public:
-  sdb_func_in(bool has_not, uint args_num);
-  virtual ~sdb_func_in();
+  Sdb_func_in(bool has_not, uint args_num);
+  virtual ~Sdb_func_in();
 
   virtual int to_bson(bson::BSONObj &obj);
   virtual const char *name() { return "in"; }
   virtual Item_func::Functype type() { return Item_func::IN_FUNC; }
 };
 
-class sdb_func_like : public sdb_func_bin_op {
+class Sdb_func_like : public Sdb_func_bin_op {
  public:
-  sdb_func_like(Item_func_like *item);
-  virtual ~sdb_func_like();
+  Sdb_func_like(Item_func_like *item);
+  virtual ~Sdb_func_like();
 
   virtual int to_bson(bson::BSONObj &obj);
-  virtual int push(sdb_item *cond_item) { return SDB_ERR_COND_UNEXPECTED_ITEM; }
+  virtual int push(Sdb_item *cond_item) { return SDB_ERR_COND_UNEXPECTED_ITEM; }
   virtual const char *name() { return "like"; }
   virtual Item_func::Functype type() { return Item_func::LIKE_FUNC; }
 

@@ -21,10 +21,10 @@
 
 #define SDB_COORD_NUM_MAX 128
 
-class sdb_conn_addrs {
+class Sdb_conn_addrs {
  public:
-  sdb_conn_addrs();
-  ~sdb_conn_addrs();
+  Sdb_conn_addrs();
+  ~Sdb_conn_addrs();
 
   int parse_conn_addrs(const char *conn_addrs);
 
@@ -33,9 +33,9 @@ class sdb_conn_addrs {
   int get_conn_num() const;
 
  private:
-  sdb_conn_addrs(const sdb_conn_addrs &rh) {}
+  Sdb_conn_addrs(const Sdb_conn_addrs &rh) {}
 
-  sdb_conn_addrs &operator=(const sdb_conn_addrs &rh) { return *this; }
+  Sdb_conn_addrs &operator=(const Sdb_conn_addrs &rh) { return *this; }
 
   void clear_conn_addrs();
 

@@ -20,17 +20,17 @@
 #include "sdb_condition.h"
 #include "sdb_err_code.h"
 
-sdb_cond_ctx::sdb_cond_ctx() {
+Sdb_cond_ctx::Sdb_cond_ctx() {
   cur_item = NULL;
-  status = sdb_cond_supported;
+  status = SDB_COND_SUPPORTED;
 }
 
-sdb_cond_ctx::~sdb_cond_ctx() {
+Sdb_cond_ctx::~Sdb_cond_ctx() {
   clear();
 }
 
-void sdb_cond_ctx::clear() {
-  sdb_item *item_tmp = NULL;
+void Sdb_cond_ctx::clear() {
+  Sdb_item *item_tmp = NULL;
 
   if (cur_item != NULL) {
     delete cur_item;
@@ -42,10 +42,10 @@ void sdb_cond_ctx::clear() {
   }
 }
 
-void sdb_cond_ctx::pop_all() {
-  sdb_item *item_tmp = NULL;
+void Sdb_cond_ctx::pop_all() {
+  Sdb_item *item_tmp = NULL;
 
-  if (sdb_cond_unsupported == status) {
+  if (SDB_COND_UNSUPPORTED == status) {
     clear();
     goto done;
   }
@@ -78,9 +78,9 @@ done:
   return;
 }
 
-void sdb_cond_ctx::pop() {
+void Sdb_cond_ctx::pop() {
   int rc = SDB_ERR_OK;
-  sdb_item *item_tmp = NULL;
+  Sdb_item *item_tmp = NULL;
 
   if (!keep_on() || item_list.is_empty()) {
     goto done;
@@ -113,41 +113,41 @@ error:
   goto done;
 }
 
-void sdb_cond_ctx::update_stat(int rc) {
+void Sdb_cond_ctx::update_stat(int rc) {
   if (SDB_ERR_OK == rc) {
     goto done;
   }
 
-  if (sdb_cond_unsupported == status || sdb_cond_beforesupported == status) {
+  if (SDB_COND_UNSUPPORTED == status || SDB_COND_BEFORE_SUPPORTED == status) {
     goto done;
   }
 
   if (NULL == cur_item || Item_func::COND_OR_FUNC == cur_item->type()) {
-    status = sdb_cond_unsupported;
+    status = SDB_COND_UNSUPPORTED;
     goto done;
   }
 
   if (Item_func::COND_AND_FUNC == cur_item->type() &&
       SDB_ERR_COND_PART_UNSUPPORTED == rc) {
-    status = sdb_cond_partsupported;
+    status = SDB_COND_PART_SUPPORTED;
   } else {
-    status = sdb_cond_beforesupported;
+    status = SDB_COND_BEFORE_SUPPORTED;
   }
 
 done:
   return;
 }
 
-bool sdb_cond_ctx::keep_on() {
-  if (sdb_cond_unsupported == status || sdb_cond_beforesupported == status) {
+bool Sdb_cond_ctx::keep_on() {
+  if (SDB_COND_UNSUPPORTED == status || SDB_COND_BEFORE_SUPPORTED == status) {
     return FALSE;
   }
   return true;
 }
 
-void sdb_cond_ctx::push(Item *cond_item) {
+void Sdb_cond_ctx::push(Item *cond_item) {
   int rc = SDB_ERR_OK;
-  sdb_item *item_tmp = NULL;
+  Sdb_item *item_tmp = NULL;
   if (!keep_on()) {
     goto done;
   }
@@ -220,65 +220,65 @@ error:
   goto done;
 }
 
-sdb_item *sdb_cond_ctx::create_sdb_item(Item_func *cond_item) {
-  sdb_item *item = NULL;
+Sdb_item *Sdb_cond_ctx::create_sdb_item(Item_func *cond_item) {
+  Sdb_item *item = NULL;
   switch (cond_item->functype()) {
     case Item_func::COND_AND_FUNC: {
-      item = new sdb_and_item();
+      item = new Sdb_and_item();
       break;
     }
     case Item_func::COND_OR_FUNC: {
-      item = new sdb_or_item();
+      item = new Sdb_or_item();
       break;
     }
     case Item_func::EQ_FUNC:
     case Item_func::EQUAL_FUNC: {
-      item = new sdb_func_eq(cond_item);
+      item = new Sdb_func_eq(cond_item);
       break;
     }
     case Item_func::NE_FUNC: {
-      item = new sdb_func_ne();
+      item = new Sdb_func_ne();
       break;
     }
     case Item_func::LT_FUNC: {
-      item = new sdb_func_lt();
+      item = new Sdb_func_lt();
       break;
     }
     case Item_func::LE_FUNC: {
-      item = new sdb_func_le();
+      item = new Sdb_func_le();
       break;
     }
     case Item_func::GT_FUNC: {
-      item = new sdb_func_gt();
+      item = new Sdb_func_gt();
       break;
     }
     case Item_func::GE_FUNC: {
-      item = new sdb_func_ge();
+      item = new Sdb_func_ge();
       break;
     }
     case Item_func::BETWEEN: {
-      item = new sdb_func_between(((Item_func_between *)cond_item)->negated);
+      item = new Sdb_func_between(((Item_func_between *)cond_item)->negated);
       break;
     }
     case Item_func::ISNULL_FUNC: {
-      item = new sdb_func_isnull();
+      item = new Sdb_func_isnull();
       break;
     }
     case Item_func::ISNOTNULL_FUNC: {
-      item = new sdb_func_isnotnull();
+      item = new Sdb_func_isnotnull();
       break;
     }
     case Item_func::IN_FUNC: {
       Item_func_in *item_func = (Item_func_in *)cond_item;
-      item = new sdb_func_in(item_func->negated, item_func->arg_count);
+      item = new Sdb_func_in(item_func->negated, item_func->arg_count);
       break;
     }
     case Item_func::LIKE_FUNC: {
-      item = new sdb_func_like((Item_func_like *)cond_item);
+      item = new Sdb_func_like((Item_func_like *)cond_item);
       break;
     }
     default: {
-      item = new sdb_func_unkown(cond_item);
+      item = new Sdb_func_unkown(cond_item);
       // update_stat( SDB_ERR_COND_PART_UNSUPPORTED ) ;
       break;
     }
@@ -286,7 +286,7 @@ sdb_item *sdb_cond_ctx::create_sdb_item(Item_func *cond_item) {
   return item;
 }
 
-int sdb_cond_ctx::to_bson(bson::BSONObj &obj) {
+int Sdb_cond_ctx::to_bson(bson::BSONObj &obj) {
   static bson::BSONObj empty_obj;
   int rc = 0;
   if (NULL != cur_item) {
@@ -303,10 +303,10 @@ done:
 }
 
 static void sdb_traverse_cond(const Item *cond_item, void *arg) {
-  sdb_cond_ctx *sdb_ctx = (sdb_cond_ctx *)arg;
+  Sdb_cond_ctx *sdb_ctx = (Sdb_cond_ctx *)arg;
 
-  if (sdb_cond_unsupported == sdb_ctx->status ||
-      sdb_cond_beforesupported == sdb_ctx->status) {
+  if (SDB_COND_UNSUPPORTED == sdb_ctx->status ||
+      SDB_COND_BEFORE_SUPPORTED == sdb_ctx->status) {
     // skip all while occured unsupported-condition
     goto done;
   }
@@ -316,7 +316,7 @@ done:
   return;
 }
 
-void sdb_parse_condtion(const Item *cond_item, sdb_cond_ctx *sdb_ctx) {
+void sdb_parse_condtion(const Item *cond_item, Sdb_cond_ctx *sdb_ctx) {
   ((Item *)cond_item)
       ->traverse_cond(&sdb_traverse_cond, (void *)sdb_ctx, Item::PREFIX);
   sdb_ctx->pop_all();
