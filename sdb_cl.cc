@@ -31,31 +31,21 @@ Sdb_cl::~Sdb_cl() {
   // cursor.pCursor = NULL ;
 }
 
-int Sdb_cl::init(Sdb_conn *connection, char *cs, char *cl, bool create,
-                 const bson::BSONObj &options) {
+int Sdb_cl::init(Sdb_conn *connection, char *cs, char *cl) {
   int rc = SDB_ERR_OK;
   if (NULL == connection || NULL == cs || NULL == cl) {
     rc = SDB_ERR_INVALID_ARG;
     goto error;
   }
 
-  // cursor.pCursor = NULL ;
-
   p_conn = connection;
   cs_name[SDB_CS_NAME_MAX_SIZE] = 0;
   strncpy(cs_name, cs, SDB_CS_NAME_MAX_SIZE);
-  if (cs_name[SDB_CS_NAME_MAX_SIZE] != 0) {
-    rc = SDB_ERR_SIZE_OVF;
-    goto error;
-  }
+
   cl_name[SDB_CL_NAME_MAX_SIZE] = 0;
   strncpy(cl_name, cl, SDB_CL_NAME_MAX_SIZE);
-  if (cl_name[SDB_CL_NAME_MAX_SIZE] != 0) {
-    rc = SDB_ERR_SIZE_OVF;
-    goto error;
-  }
 
-  rc = re_init(create, options);
+  rc = re_init();
 
 done:
   return rc;
@@ -63,32 +53,18 @@ error:
   goto done;
 }
 
-int Sdb_cl::re_init(bool create, const bson::BSONObj &options) {
+int Sdb_cl::re_init() {
   int rc = SDB_ERR_OK;
   int retry_times = 2;
   sdbCollectionSpace cs;
 
 retry:
-  if (!create) {
-    rc = p_conn->get_sdb().getCollectionSpace(cs_name, cs);
-  } else {
-    rc = p_conn->get_sdb().createCollectionSpace(cs_name, 4096, cs);
-    if (SDB_DMS_CS_EXIST == rc) {
-      rc = p_conn->get_sdb().getCollectionSpace(cs_name, cs);
-    }
-  }
+  rc = p_conn->get_sdb().getCollectionSpace(cs_name, cs);
   if (rc != SDB_ERR_OK) {
     goto error;
   }
 
-  if (!create) {
-    rc = cs.getCollection(cl_name, cl);
-  } else {
-    rc = cs.createCollection(cl_name, options, cl);
-    if (SDB_DMS_EXIST == rc) {
-      rc = cs.getCollection(cl_name, cl);
-    }
-  }
+  rc = cs.getCollection(cl_name, cl);
   if (rc != SDB_ERR_OK) {
     goto error;
   }
@@ -98,7 +74,7 @@ done:
 error:
   if (IS_SDB_NET_ERR(rc)) {
     bool is_transaction = p_conn->is_transaction();
-    if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
+    if (!is_transaction && retry_times-- > 0 && 0 == p_conn->connect()) {
       goto retry;
     }
   }

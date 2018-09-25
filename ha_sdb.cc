@@ -1259,7 +1259,7 @@ int ha_sdb::delete_table(const char *from) {
     goto error;
   }
 
-  rc = conn_tmp->get_cl(db_name, table_name, cl, FALSE);
+  rc = conn_tmp->get_cl(db_name, table_name, cl);
   if (0 != rc) {
     int rc_tmp = get_sdb_code(rc);
     if (SDB_DMS_NOTEXIST == rc_tmp || SDB_DMS_CS_NOTEXIST == rc_tmp) {
@@ -1482,7 +1482,12 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
     goto error;
   }
 
-  rc = conn_tmp->create_cl(db_name, table_name, cl, options);
+  rc = conn_tmp->create_cl(db_name, table_name, options);
+  if (0 != rc) {
+    goto error;
+  }
+
+  rc = conn_tmp->get_cl(db_name, table_name, cl);
   if (0 != rc) {
     goto error;
   }

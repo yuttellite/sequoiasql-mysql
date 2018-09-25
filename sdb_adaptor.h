@@ -31,12 +31,6 @@ class Sdb_adaptor {
 
   static Sdb_adaptor *get_instance();
 
-  int get_sdb_cl(my_thread_id tid, char *cs_name, char *cl_name,
-                 Sdb_cl_auto_ptr &collection, bool create = TRUE);
-
-  int create_sdb_cl(my_thread_id tid, char *cs_name, char *cl_name,
-                    Sdb_cl_auto_ptr &collection);
-
   int get_sdb_conn(my_thread_id tid, Sdb_conn_auto_ptr &sdb_ptr);
 
   void del_sdb_conn(my_thread_id tid);
@@ -56,7 +50,6 @@ class Sdb_adaptor {
   pthread_rwlock_t rw_mutex;
 };
 
-#define SDB_CL_MGR_INST Sdb_adaptor::get_instance()
 #define SDB_CONN_MGR_INST Sdb_adaptor::get_instance()
 
 #endif

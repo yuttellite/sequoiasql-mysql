@@ -29,11 +29,9 @@ class Sdb_cl {
 
   ~Sdb_cl();
 
-  int init(Sdb_conn *connection, char *cs, char *cl, bool create = FALSE,
-           const bson::BSONObj &options = sdbclient::_sdbStaticObject);
+  int init(Sdb_conn *connection, char *cs, char *cl);
 
-  int re_init(bool create = FALSE,
-              const bson::BSONObj &options = sdbclient::_sdbStaticObject);
+  int re_init();
 
   int begin_transaction();
 

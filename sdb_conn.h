@@ -45,11 +45,9 @@ class Sdb_conn {
 
   bool is_transaction();
 
-  int get_cl(char *cs_name, char *cl_name, Sdb_cl_auto_ptr &cl_ptr,
-             bool create = FALSE,
-             const bson::BSONObj &options = sdbclient::_sdbStaticObject);
+  int get_cl(char *cs_name, char *cl_name, Sdb_cl_auto_ptr &cl_ptr);
 
-  int create_cl(char *cs_name, char *cl_name, Sdb_cl_auto_ptr &cl_ptr,
+  int create_cl(char *cs_name, char *cl_name,
                 const bson::BSONObj &options = sdbclient::_sdbStaticObject);
 
   int drop_cs(char *cs_name);
@@ -63,6 +61,8 @@ class Sdb_conn {
   int create_global_domain(const char *domain_name);
 
   int create_global_domain_cs(const char *domain_name, char *cs_name);
+
+  inline bool is_valid() { return connection.isValid(); }
 
  private:
   sdbclient::sdb connection;

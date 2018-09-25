@@ -132,8 +132,7 @@ bool Sdb_conn::is_transaction() {
   return transactionon;
 }
 
-int Sdb_conn::get_cl(char *cs_name, char *cl_name, Sdb_cl_auto_ptr &cl_ptr,
-                     bool create, const bson::BSONObj &options) {
+int Sdb_conn::get_cl(char *cs_name, char *cl_name, Sdb_cl_auto_ptr &cl_ptr) {
   int rc = SDB_ERR_OK;
   std::map<std::string, Sdb_cl_auto_ptr>::iterator iter;
   cl_ptr.clear();
@@ -152,12 +151,6 @@ int Sdb_conn::get_cl(char *cs_name, char *cl_name, Sdb_cl_auto_ptr &cl_ptr,
     while (iter != ret.second) {
       if (iter->second.ref() == 1) {
         cl_ptr = iter->second;
-        if (create) {
-          rc = cl_ptr->init(this, cs_name, cl_name, create, options);
-          if (rc != SDB_ERR_OK) {
-            goto error;
-          }
-        }
         goto done;
       }
       ++iter;
@@ -166,7 +159,7 @@ int Sdb_conn::get_cl(char *cs_name, char *cl_name, Sdb_cl_auto_ptr &cl_ptr,
 
   {
     Sdb_cl_auto_ptr tmp_cl(new Sdb_cl());
-    rc = tmp_cl->init(this, cs_name, cl_name, create, options);
+    rc = tmp_cl->init(this, cs_name, cl_name);
     if (rc != SDB_ERR_OK) {
       goto error;
     }
@@ -184,18 +177,37 @@ error:
   goto done;
 }
 
-int Sdb_conn::create_cl(char *cs_name, char *cl_name, Sdb_cl_auto_ptr &cl_ptr,
+int Sdb_conn::create_cl(char *cs_name, char *cl_name,
                         const bson::BSONObj &options) {
   int rc = SDB_ERR_OK;
-  rc = this->get_cl(cs_name, cl_name, cl_ptr, TRUE, options);
+  int retry_times = 2;
+  sdbclient::sdbCollectionSpace cs;
+  sdbclient::sdbCollection cl;
+
+retry:
+  rc = connection.createCollectionSpace(cs_name, 4096, cs);
+  if (SDB_DMS_CS_EXIST == rc) {
+    rc = connection.getCollectionSpace(cs_name, cs);
+  }
   if (rc != SDB_ERR_OK) {
     goto error;
   }
+
+  rc = cs.createCollection(cl_name, options, cl);
+  if (SDB_DMS_EXIST == rc) {
+    rc = cs.getCollection(cl_name, cl);
+  }
+  if (rc != SDB_ERR_OK) {
+    goto error;
+  }
+
 done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    connect();
+    if (!transactionon && retry_times-- > 0 && 0 == connect()) {
+      goto retry;
+    }
   }
   convert_sdb_code(rc);
   goto done;
