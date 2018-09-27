@@ -16,13 +16,11 @@
 #ifndef SDB_CONN__H
 #define SDB_CONN__H
 
-#include <map>
 #include <mysql/psi/mysql_thread.h>
 #include <my_global.h>
-#include <atomic_class.h>
 #include "client.hpp"
 
-class Sdb_cl_auto_ptr;
+class Sdb_cl;
 
 class Sdb_conn {
  public:
@@ -44,18 +42,14 @@ class Sdb_conn {
 
   bool is_transaction();
 
-  int get_cl(char *cs_name, char *cl_name, Sdb_cl_auto_ptr &cl_ptr);
+  int get_cl(char *cs_name, char *cl_name, Sdb_cl &cl);
 
   int create_cl(char *cs_name, char *cl_name,
                 const bson::BSONObj &options = sdbclient::_sdbStaticObject);
 
   int drop_cs(char *cs_name);
 
-  void clear_cl(char *cs_name, char *cl_name);
-
-  void clear_all_cl();
-
-  bool is_idle();
+  int drop_cl(char *cs_name, char *cl_name);
 
   int create_global_domain(const char *domain_name);
 
@@ -67,8 +61,6 @@ class Sdb_conn {
   sdbclient::sdb connection;
   bool transactionon;
   my_thread_id tid;
-  pthread_rwlock_t rw_mutex;
-  std::multimap<std::string, Sdb_cl_auto_ptr> cl_list;
 };
 
 #endif

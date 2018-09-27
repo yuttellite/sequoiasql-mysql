@@ -229,7 +229,7 @@ error:
 }
 
 int ha_sdb::close(void) {
-  cl.clear();
+  cl.close();
   if (share) {
     free_sdb_share(share);
     share = NULL;
@@ -423,7 +423,7 @@ int ha_sdb::write_row(uchar *buf) {
     goto error;
   }
 
-  rc = cl->insert(obj);
+  rc = cl.insert(obj);
 
   // ignore duplicate key
   if (SDB_ERR_INNER_CODE_END + SDB_IXM_DUP_KEY == rc && ha_thd()->lex &&
@@ -458,7 +458,7 @@ int ha_sdb::update_row(const uchar *old_data, uchar *new_data) {
   }
 
   rule_obj = BSON("$set" << new_obj << "$unset" << null_obj);
-  rc = cl->update(rule_obj, cur_rec);
+  rc = cl.update(rule_obj, cur_rec);
 
   // ignore duplicate key
   if (SDB_ERR_INNER_CODE_END + SDB_IXM_DUP_KEY == rc && ha_thd()->lex &&
@@ -482,7 +482,7 @@ int ha_sdb::delete_row(const uchar *buf) {
 
   ha_statistic_increment(&SSV::ha_delete_count);
 
-  rc = cl->del(cur_rec);
+  rc = cl.del(cur_rec);
   if (rc != 0) {
     goto error;
   }
@@ -612,12 +612,12 @@ int ha_sdb::index_read_one(bson::BSONObj condition, int order_direction,
     goto error;
   }
 
-  rc = cl->query(condition, sdbclient::_sdbStaticObject, order_by, hint);
+  rc = cl.query(condition, sdbclient::_sdbStaticObject, order_by, hint);
   if (rc) {
     SDB_LOG_ERROR(
         "Collection[%s.%s] failed to query with "
         "condition[%s], order[%s], hint[%s]. rc: %d",
-        cl->get_cs_name(), cl->get_cl_name(), condition.toString().c_str(),
+        cl.get_cs_name(), cl.get_cl_name(), condition.toString().c_str(),
         order_by.toString().c_str(), hint.toString().c_str(), rc);
     goto error;
   }
@@ -658,7 +658,7 @@ int ha_sdb::index_init(uint idx, bool sorted) {
 }
 
 int ha_sdb::index_end() {
-  cl->close();
+  cl.close();
   keynr = -1;
   return 0;
 }
@@ -684,7 +684,7 @@ int ha_sdb::rnd_init(bool scan) {
 }
 
 int ha_sdb::rnd_end() {
-  cl->close();
+  cl.close();
   return 0;
 }
 
@@ -837,8 +837,8 @@ error:
 
 int ha_sdb::cur_row(uchar *buf) {
   int rc = 0;
-  // assert(cl->get_tid() == ha_thd()->thread_id()) ;
-  rc = cl->current(cur_rec);
+  DBUG_ASSERT(cl.get_tid() == ha_thd()->thread_id());
+  rc = cl.current(cur_rec);
   if (rc != 0) {
     goto error;
   }
@@ -854,7 +854,7 @@ error:
 
 int ha_sdb::next_row(bson::BSONObj &obj, uchar *buf) {
   int rc = 0;
-  rc = cl->next(obj);
+  rc = cl.next(obj);
   if (rc != 0) {
     if (HA_ERR_END_OF_FILE == rc) {
       table->status = STATUS_NOT_FOUND;
@@ -876,14 +876,14 @@ int ha_sdb::rnd_next(uchar *buf) {
   int rc = 0;
   if (first_read) {
     check_thread();
-    rc = cl->query(condition);
+    rc = cl.query(condition);
     condition = empty_obj;
     if (rc != 0) {
       goto error;
     }
     first_read = FALSE;
   }
-  DBUG_ASSERT(cl->get_tid() == ha_thd()->thread_id());
+  DBUG_ASSERT(cl.get_tid() == ha_thd()->thread_id());
 
   ha_statistic_increment(&SSV::ha_read_rnd_next_count);
   rc = next_row(cur_rec, buf);
@@ -904,9 +904,9 @@ int ha_sdb::rnd_pos(uchar *buf, uchar *pos) {
   objBuilder.appendOID("_id", &tmpOid);
   bson::BSONObj oidObj = objBuilder.obj();
 
-  DBUG_ASSERT(cl->get_tid() == ha_thd()->thread_id());
+  DBUG_ASSERT(cl.get_tid() == ha_thd()->thread_id());
 
-  rc = cl->query_one(cur_rec, oidObj);
+  rc = cl.query_one(cur_rec, oidObj);
   if (rc) {
     goto error;
   }
@@ -941,7 +941,7 @@ int ha_sdb::info(uint flag) {
   int rc = 0;
 
   if (used_times++ % 100 == 0) {
-    rc = cl->get_count(rec_num);
+    rc = cl.get_count(rec_num);
     if (rc != 0) {
       goto error;
     }
@@ -951,7 +951,7 @@ int ha_sdb::info(uint flag) {
     time_t cur_time = time(NULL);
     // flush rec_num every 5 minutes
     if (difftime(cur_time, last_flush_time) > 5 * 60) {
-      rc = cl->get_count(rec_num);
+      rc = cl.get_count(rec_num);
       if (rc != 0) {
         goto error;
       }
@@ -993,7 +993,7 @@ int ha_sdb::extra(enum ha_extra_function operation) {
 
 void ha_sdb::check_thread() {
   int rc = 0;
-  if (cl->get_tid() != ha_thd()->thread_id()) {
+  if (cl.get_tid() != ha_thd()->thread_id()) {
     Sdb_conn *conn = check_sdb_in_thd(ha_thd(), true);
     if (NULL == conn) {
       rc = HA_ERR_NO_CONNECTION;
@@ -1017,14 +1017,21 @@ error:
 
 int ha_sdb::external_lock(THD *thd, int lock_type) {
   int rc = 0;
-  check_thread();
+  Sdb_conn *conn = NULL;
 
   ulonglong trxid = thd->thread_id();
   if (!thd_test_options(thd, OPTION_BEGIN)) {
     goto done;
   }
 
-  rc = cl->begin_transaction();
+  conn = check_sdb_in_thd(thd, true);
+  if (NULL == conn) {
+    rc = HA_ERR_NO_CONNECTION;
+    goto error;
+  }
+  DBUG_ASSERT(conn->get_tid() == thd->thread_id());
+
+  rc = conn->begin_transaction();
   if (rc != 0) {
     goto error;
   }
@@ -1147,7 +1154,7 @@ int ha_sdb::drop_index(Alter_inplace_info *ha_alter_info) {
   for (uint i = 0; i < ha_alter_info->index_drop_count; i++) {
     KEY *keyInfo = NULL;
     keyInfo = ha_alter_info->index_drop_buffer[i];
-    rc = sdb_drop_index(keyInfo, cl);
+    rc = cl.drop_index(keyInfo->name);
     if (rc) {
       goto error;
     }
@@ -1209,15 +1216,15 @@ error:
 
 int ha_sdb::delete_all_rows(void) {
   check_thread();
-  if (cl->is_transaction()) {
-    return cl->del();
+  if (cl.is_transaction()) {
+    return cl.del();
   }
   return this->truncate();
 }
 
 int ha_sdb::truncate() {
   int rc = 0;
-  rc = cl->truncate();
+  rc = cl.truncate();
   if (rc != 0) {
     goto error;
   }
@@ -1250,7 +1257,7 @@ int ha_sdb::delete_table(const char *from) {
   }
   DBUG_ASSERT(conn->get_tid() == ha_thd()->thread_id());
 
-  rc = conn->get_cl(db_name, table_name, cl);
+  rc = conn->drop_cl(db_name, table_name);
   if (0 != rc) {
     int rc_tmp = get_sdb_code(rc);
     if (SDB_DMS_NOTEXIST == rc_tmp || SDB_DMS_CS_NOTEXIST == rc_tmp) {
@@ -1259,13 +1266,6 @@ int ha_sdb::delete_table(const char *from) {
     }
     goto error;
   }
-
-  rc = cl->drop();
-  if (0 != rc) {
-    goto error;
-  }
-
-  cl.clear();
 
 done:
   return rc;

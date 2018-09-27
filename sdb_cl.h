@@ -31,12 +31,6 @@ class Sdb_cl {
 
   int re_init();
 
-  int begin_transaction();
-
-  int commit_transaction();
-
-  int rollback_transaction();
-
   bool is_transaction();
 
   char *get_cs_name();
@@ -97,6 +91,7 @@ class Sdb_cl {
 
  private:
   Sdb_conn *p_conn;
+  my_thread_id thread_id;
   sdbclient::sdbCollection cl;
   sdbclient::sdbCursor cursor;
   char cs_name[SDB_CS_NAME_MAX_SIZE + 1];

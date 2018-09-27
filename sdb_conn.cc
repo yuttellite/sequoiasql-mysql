@@ -21,19 +21,13 @@
 #include <sql_class.h>
 #include <client.hpp>
 #include "sdb_cl.h"
-#include "sdb_cl_ptr.h"
 #include "sdb_conf.h"
 #include "sdb_util.h"
 #include "sdb_err_code.h"
 
-Sdb_conn::Sdb_conn(my_thread_id _tid) : transactionon(false), tid(_tid) {
-  pthread_rwlock_init(&rw_mutex, NULL);
-}
+Sdb_conn::Sdb_conn(my_thread_id _tid) : transactionon(false), tid(_tid) {}
 
-Sdb_conn::~Sdb_conn() {
-  clear_all_cl();
-  pthread_rwlock_destroy(&rw_mutex);
-}
+Sdb_conn::~Sdb_conn() {}
 
 sdbclient::sdb &Sdb_conn::get_sdb() {
   return connection;
@@ -46,25 +40,17 @@ my_thread_id Sdb_conn::get_tid() {
 int Sdb_conn::connect() {
   int rc = SDB_ERR_OK;
   if (!connection.isValid()) {
-    std::map<std::string, Sdb_cl_auto_ptr>::iterator iter;
     transactionon = false;
     Sdb_conn_addrs conn_addrs;
     int tmp_rc = conn_addrs.parse_conn_addrs(sdb_conn_str);
-    assert(tmp_rc == 0);
+    DBUG_ASSERT(tmp_rc == 0);
     rc = connection.connect(conn_addrs.get_conn_addrs(),
                             conn_addrs.get_conn_num(), "", "");
     if (rc != SDB_ERR_OK) {
       goto error;
     }
-
-    // get the r_lock because the cl_list will not change
-    Sdb_rw_lock_r r_lock(&rw_mutex);
-    iter = cl_list.begin();
-    while (iter != cl_list.end()) {
-      iter->second->re_init();
-      ++iter;
-    }
   }
+
 done:
   return rc;
 error:
@@ -130,41 +116,15 @@ bool Sdb_conn::is_transaction() {
   return transactionon;
 }
 
-int Sdb_conn::get_cl(char *cs_name, char *cl_name, Sdb_cl_auto_ptr &cl_ptr) {
+int Sdb_conn::get_cl(char *cs_name, char *cl_name, Sdb_cl &cl) {
   int rc = SDB_ERR_OK;
-  std::map<std::string, Sdb_cl_auto_ptr>::iterator iter;
-  cl_ptr.clear();
-  std::string str_tmp(cs_name);
-  str_tmp.append(".");
-  str_tmp.append(cl_name);
+  cl.close();
 
-  {
-    // TODO: improve performence
-    std::pair<std::multimap<std::string, Sdb_cl_auto_ptr>::iterator,
-              std::multimap<std::string, Sdb_cl_auto_ptr>::iterator>
-        ret;
-    Sdb_rw_lock_r r_lock(&rw_mutex);
-    ret = cl_list.equal_range(str_tmp);
-    iter = ret.first;
-    while (iter != ret.second) {
-      if (iter->second.ref() == 1) {
-        cl_ptr = iter->second;
-        goto done;
-      }
-      ++iter;
-    }
+  rc = cl.init(this, cs_name, cl_name);
+  if (rc != SDB_ERR_OK) {
+    goto error;
   }
 
-  {
-    Sdb_cl_auto_ptr tmp_cl(new Sdb_cl());
-    rc = tmp_cl->init(this, cs_name, cl_name);
-    if (rc != SDB_ERR_OK) {
-      goto error;
-    }
-    cl_ptr = tmp_cl;
-    Sdb_rw_lock_w w_lock(&rw_mutex);
-    cl_list.insert(std::pair<std::string, Sdb_cl_auto_ptr>(str_tmp, cl_ptr));
-  }
 done:
   return rc;
 error:
@@ -227,50 +187,30 @@ error:
   goto done;
 }
 
-void Sdb_conn::clear_cl(char *cs_name, char *cl_name) {
-  std::map<std::string, Sdb_cl_auto_ptr>::iterator iter;
-  std::string str_tmp(cs_name);
-  str_tmp.append(".");
-  str_tmp.append(cl_name);
+int Sdb_conn::drop_cl(char *cs_name, char *cl_name) {
+  int rc = SDB_ERR_OK;
+  int retry_times = 2;
+  sdbclient::sdbCollectionSpace cs;
 
-  {
-    Sdb_rw_lock_w w_lock(&rw_mutex);
-    std::pair<std::multimap<std::string, Sdb_cl_auto_ptr>::iterator,
-              std::multimap<std::string, Sdb_cl_auto_ptr>::iterator>
-        ret;
-    ret = cl_list.equal_range(str_tmp);
-    iter = ret.first;
-    while (iter != ret.second) {
-      if (iter->second.ref() <= 1) {
-        cl_list.erase(iter++);
-        continue;
-      }
-      ++iter;
-    }
+retry:
+  rc = connection.getCollectionSpace(cs_name, cs);
+  if (rc != SDB_ERR_OK) {
+    goto error;
   }
-}
 
-void Sdb_conn::clear_all_cl() {
-  std::map<std::string, Sdb_cl_auto_ptr>::iterator iter;
-  Sdb_rw_lock_w w_lock(&rw_mutex);
-  iter = cl_list.begin();
-  while (iter != cl_list.end()) {
-    // TODO: assert(iter->second.ref() == 1);
-    cl_list.erase(iter++);
+  rc = cs.dropCollection(cl_name);
+  if (rc != SDB_ERR_OK) {
+    goto error;
   }
-}
 
-bool Sdb_conn::is_idle() {
-  std::map<std::string, Sdb_cl_auto_ptr>::iterator iter;
-  Sdb_rw_lock_r r_lock(&rw_mutex);
-  iter = cl_list.begin();
-  while (iter != cl_list.end()) {
-    if (iter->second.ref() > 1) {
-      return FALSE;
-    }
-    ++iter;
+done:
+  return rc;
+error:
+  if (IS_SDB_NET_ERR(rc)) {
+    connect();
   }
-  return TRUE;
+  convert_sdb_code(rc);
+  goto done;
 }
 
 int Sdb_conn::create_global_domain(const char *domain_name) {

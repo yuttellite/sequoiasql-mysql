@@ -15,15 +15,16 @@
 
 #include <my_base.h>
 #include "sdb_cl.h"
-#include "sdb_cl_ptr.h"
 #include "sdb_conn.h"
 #include "sdb_err_code.h"
 
 using namespace sdbclient;
 
-Sdb_cl::Sdb_cl() {}
+Sdb_cl::Sdb_cl() : p_conn(NULL), thread_id(0) {}
 
-Sdb_cl::~Sdb_cl() {}
+Sdb_cl::~Sdb_cl() {
+  close();
+}
 
 int Sdb_cl::init(Sdb_conn *connection, char *cs, char *cl) {
   int rc = SDB_ERR_OK;
@@ -33,6 +34,8 @@ int Sdb_cl::init(Sdb_conn *connection, char *cs, char *cl) {
   }
 
   p_conn = connection;
+  thread_id = connection->get_tid();
+
   cs_name[SDB_CS_NAME_MAX_SIZE] = 0;
   strncpy(cs_name, cs, SDB_CS_NAME_MAX_SIZE);
 
@@ -81,18 +84,6 @@ int Sdb_cl::check_connect(int rc) {
     return p_conn->connect();
   }
   return SDB_ERR_OK;
-}
-
-int Sdb_cl::begin_transaction() {
-  return p_conn->begin_transaction();
-}
-
-int Sdb_cl::commit_transaction() {
-  return p_conn->commit_transaction();
-}
-
-int Sdb_cl::rollback_transaction() {
-  return p_conn->rollback_transaction();
 }
 
 bool Sdb_cl::is_transaction() {
@@ -360,7 +351,7 @@ void Sdb_cl::close() {
 }
 
 my_thread_id Sdb_cl::get_tid() {
-  return p_conn->get_tid();
+  return thread_id;
 }
 
 int Sdb_cl::drop() {
@@ -407,83 +398,4 @@ error:
   }
   convert_sdb_code(rc);
   goto done;
-}
-
-Sdb_cl_ref_ptr::Sdb_cl_ref_ptr(Sdb_cl *collection) {
-  DBUG_ASSERT(collection != NULL);
-  sdb_collection = collection;
-  ref = 1;
-}
-
-Sdb_cl_ref_ptr::~Sdb_cl_ref_ptr() {
-  if (sdb_collection) {
-    delete sdb_collection;
-    sdb_collection = NULL;
-  }
-  ref = 0;
-}
-
-Sdb_cl_auto_ptr::Sdb_cl_auto_ptr() : ref_ptr(NULL) {}
-
-Sdb_cl_auto_ptr::Sdb_cl_auto_ptr(Sdb_cl *collection) {
-  ref_ptr = new Sdb_cl_ref_ptr(collection);
-}
-
-Sdb_cl_auto_ptr::Sdb_cl_auto_ptr(const Sdb_cl_auto_ptr &other) {
-  this->ref_ptr = other.ref_ptr;
-  if (ref_ptr) {
-    ref_ptr->ref.atomic_add(1);
-  }
-}
-
-Sdb_cl_auto_ptr::~Sdb_cl_auto_ptr() {
-  clear();
-}
-
-void Sdb_cl_auto_ptr::clear() {
-  int ref_tmp = 0;
-  if (NULL == ref_ptr) {
-    goto done;
-  }
-
-  // Note: ref_tmp is the old-value
-  ref_tmp = ref_ptr->ref.atomic_add(-1);
-
-  if (2 == ref_tmp) {
-    // there is no table-handler use cl-instance,
-    // only one in cl_list which in Sdb_conn,
-    // then delete it from cl_list.
-    if (NULL != ref_ptr->sdb_collection) {
-      // SDB_CONN_MGR_INST->del_sdb_conn(ref_ptr->sdb_collection->get_tid());
-    }
-  } else if (1 == ref_tmp) {
-    delete ref_ptr;
-  }
-  ref_ptr = NULL;
-done:
-  return;
-}
-
-Sdb_cl_auto_ptr &Sdb_cl_auto_ptr::operator=(Sdb_cl_auto_ptr &other) {
-  clear();
-  this->ref_ptr = other.ref_ptr;
-  DBUG_ASSERT(ref_ptr != NULL);
-  DBUG_ASSERT(ref_ptr->sdb_collection != NULL);
-  ref_ptr->ref.atomic_add(1);
-  return *this;
-}
-
-Sdb_cl &Sdb_cl_auto_ptr::operator*() {
-  return *ref_ptr->sdb_collection;
-}
-
-Sdb_cl *Sdb_cl_auto_ptr::operator->() {
-  return ref_ptr->sdb_collection;
-}
-
-int Sdb_cl_auto_ptr::ref() {
-  if (ref_ptr) {
-    return ref_ptr->ref.atomic_get();
-  }
-  return 0;
 }

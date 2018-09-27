@@ -16,7 +16,7 @@
 #include "handler.h"
 #include "client.hpp"
 #include "sdb_def.h"
-#include "sdb_cl_ptr.h"
+#include "sdb_cl.h"
 
 struct Sdb_share {
   char *table_name;
@@ -261,7 +261,7 @@ class ha_sdb : public handler {
 
  private:
   THR_LOCK_DATA lock_data;
-  Sdb_cl_auto_ptr cl;
+  Sdb_cl cl;
   bool first_read;
   bson::BSONObj cur_rec;
   bson::BSONObj condition;

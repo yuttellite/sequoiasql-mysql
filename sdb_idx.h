@@ -18,11 +18,9 @@
 
 #include "sql_class.h"
 #include "client.hpp"
-#include "sdb_cl_ptr.h"
+#include "sdb_cl.h"
 
-int sdb_create_index(const KEY *keyInfo, Sdb_cl_auto_ptr cl);
-
-int sdb_drop_index(const KEY *keyInfo, Sdb_cl_auto_ptr cl);
+int sdb_create_index(const KEY *keyInfo, Sdb_cl &cl);
 
 const char *sdb_get_idx_name(KEY *key_info);
 
