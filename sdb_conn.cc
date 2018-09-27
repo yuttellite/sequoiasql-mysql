@@ -18,7 +18,6 @@
 #endif
 
 #include "sdb_conn.h"
-#include "sdb_conn_ptr.h"
 #include <sql_class.h>
 #include <client.hpp>
 #include "sdb_cl.h"
@@ -26,7 +25,6 @@
 #include "sdb_conf.h"
 #include "sdb_util.h"
 #include "sdb_err_code.h"
-#include "sdb_adaptor.h"
 
 Sdb_conn::Sdb_conn(my_thread_id _tid) : transactionon(false), tid(_tid) {
   pthread_rwlock_init(&rw_mutex, NULL);
@@ -257,7 +255,7 @@ void Sdb_conn::clear_all_cl() {
   Sdb_rw_lock_w w_lock(&rw_mutex);
   iter = cl_list.begin();
   while (iter != cl_list.end()) {
-    assert(iter->second.ref() == 1);
+    // TODO: assert(iter->second.ref() == 1);
     cl_list.erase(iter++);
   }
 }
@@ -344,17 +342,6 @@ int Sdb_conn::create_global_domain_cs(const char *domain_name, char *cs_name) {
     goto error;
   }
 
-  // cs may in cache, so don't exec getCollectionSpace
-  /*rc = connection.getCollectionSpace( cs_name, cs ) ;
-  if ( SDB_ERR_OK  == rc )
-  {
-     goto done ;
-  }
-  if ( SDB_DMS_CS_NOTEXIST != rc )
-  {
-     goto error ;
-  }*/
-
   options = BSON("Domain" << domain_name);
   rc = connection.createCollectionSpace(cs_name, options, cs);
   if (SDB_DMS_CS_EXIST == rc) {
@@ -372,84 +359,4 @@ error:
   }
   convert_sdb_code(rc);
   goto done;
-}
-
-Sdb_conn_ref_ptr::Sdb_conn_ref_ptr(Sdb_conn *connection) {
-  DBUG_ASSERT(connection != NULL);
-  sdb_connection = connection;
-  ref = 1;
-}
-
-Sdb_conn_ref_ptr::~Sdb_conn_ref_ptr() {
-  if (sdb_connection) {
-    delete sdb_connection;
-    sdb_connection = NULL;
-  }
-  ref = 0;
-}
-
-Sdb_conn_auto_ptr::Sdb_conn_auto_ptr() : ref_ptr(NULL) {}
-
-Sdb_conn_auto_ptr::Sdb_conn_auto_ptr(Sdb_conn *connection) {
-  ref_ptr = new Sdb_conn_ref_ptr(connection);
-}
-
-Sdb_conn_auto_ptr::Sdb_conn_auto_ptr(const Sdb_conn_auto_ptr &other) {
-  this->ref_ptr = other.ref_ptr;
-  if (ref_ptr) {
-    ref_ptr->ref.atomic_add(1);
-  }
-}
-
-Sdb_conn_auto_ptr::~Sdb_conn_auto_ptr() {
-  clear();
-}
-
-void Sdb_conn_auto_ptr::clear() {
-  int ref_tmp = 0;
-  if (NULL == ref_ptr) {
-    goto done;
-  }
-
-  // Note: ref_tmp is the old-value
-  ref_tmp = ref_ptr->ref.atomic_add(-1);
-
-  if (1 == ref_tmp) {
-    delete ref_ptr;
-  } else if (2 == ref_tmp) {
-    // there is no table-handler use sdb-instance,
-    // only one in conn_list which in sdb_conn_mgr,
-    // then delete it from conn_list.
-    if (NULL != ref_ptr->sdb_connection) {
-      SDB_CONN_MGR_INST->del_sdb_conn(ref_ptr->sdb_connection->get_tid());
-    }
-  }
-
-  ref_ptr = NULL;
-done:
-  return;
-}
-
-Sdb_conn_auto_ptr &Sdb_conn_auto_ptr::operator=(Sdb_conn_auto_ptr &other) {
-  clear();
-  this->ref_ptr = other.ref_ptr;
-  DBUG_ASSERT(ref_ptr != NULL);
-  DBUG_ASSERT(ref_ptr->sdb_connection != NULL);
-  ref_ptr->ref.atomic_add(1);
-  return *this;
-}
-
-Sdb_conn &Sdb_conn_auto_ptr::operator*() {
-  return *ref_ptr->sdb_connection;
-}
-
-Sdb_conn *Sdb_conn_auto_ptr::operator->() {
-  return ref_ptr->sdb_connection;
-}
-
-int Sdb_conn_auto_ptr::ref() {
-  if (ref_ptr) {
-    return ref_ptr->ref.atomic_get();
-  }
-  return 0;
 }

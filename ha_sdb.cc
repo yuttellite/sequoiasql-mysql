@@ -28,6 +28,7 @@
 #include "sdb_conf.h"
 #include "sdb_cl.h"
 #include "sdb_conn.h"
+#include "sdb_thd.h"
 #include "sdb_util.h"
 #include "sdb_condition.h"
 #include "sdb_err_code.h"
@@ -50,6 +51,8 @@ using namespace sdbclient;
 #define SDB_ID_STR_LEN 24
 #define SDB_FIELD_MAX_LEN (16 * 1024 * 1024)
 const static char sdb_ver_info[] = SDB_VER_INFO;
+
+handlerton *sdb_hton = NULL;
 
 mysql_mutex_t sdb_mutex;
 static PSI_mutex_key key_mutex_sdb, key_mutex_SDB_SHARE_mutex;
@@ -184,6 +187,7 @@ uint ha_sdb::max_supported_key_length() const {
 int ha_sdb::open(const char *name, int mode, uint test_if_locked) {
   int rc = 0;
   ref_length = SDB_ID_STR_LEN + 1;  // length of _id
+  Sdb_conn *connection = NULL;
 
   if (!(share = get_sdb_share(name, table))) {
     rc = SDB_ERR_OOM;
@@ -197,15 +201,12 @@ int ha_sdb::open(const char *name, int mode, uint test_if_locked) {
     goto error;
   }
 
-  rc = SDB_CONN_MGR_INST->get_sdb_conn(ha_thd()->thread_id(), connection);
-  // rc = SDB_CONN_MGR_INST->get_sdb_conn(
-  // (my_thread_id)(ha_thd()->active_vio->mysql_socket.fd),
-  //                                      connection ) ;
-  if (0 != rc) {
-    SDB_LOG_ERROR("Thread[%u] can't get connection. rc: %d",
-                  ha_thd()->thread_id(), rc);
+  connection = check_sdb_in_thd(ha_thd(), true);
+  if (NULL == connection) {
+    rc = HA_ERR_NO_CONNECTION;
     goto error;
   }
+  DBUG_ASSERT(connection->get_tid() == ha_thd()->thread_id());
 
   rc = connection->get_cl(db_name, table_name, cl);
   if (0 != rc) {
@@ -215,8 +216,8 @@ int ha_sdb::open(const char *name, int mode, uint test_if_locked) {
   }
 
   thr_lock_data_init(&share->lock, &lock_data, (void *)this);
-  // fd = ha_thd()->active_vio->mysql_socket.fd ;
   fd = ha_thd()->thread_id();
+
 done:
   return rc;
 error:
@@ -229,7 +230,6 @@ error:
 
 int ha_sdb::close(void) {
   cl.clear();
-  connection.clear();
   if (share) {
     free_sdb_share(share);
     share = NULL;
@@ -883,9 +883,8 @@ int ha_sdb::rnd_next(uchar *buf) {
     }
     first_read = FALSE;
   }
-  assert(cl->get_tid() == ha_thd()->thread_id());
-  // assert( cl->get_tid() ==
-  // (my_thread_id)(ha_thd()->active_vio->mysql_socket.fd )) ;
+  DBUG_ASSERT(cl->get_tid() == ha_thd()->thread_id());
+
   ha_statistic_increment(&SSV::ha_read_rnd_next_count);
   rc = next_row(cur_rec, buf);
   if (rc != 0) {
@@ -905,7 +904,8 @@ int ha_sdb::rnd_pos(uchar *buf, uchar *pos) {
   objBuilder.appendOID("_id", &tmpOid);
   bson::BSONObj oidObj = objBuilder.obj();
 
-  // assert(cl->get_tid() == ha_thd()->thread_id()) ;
+  DBUG_ASSERT(cl->get_tid() == ha_thd()->thread_id());
+
   rc = cl->query_one(cur_rec, oidObj);
   if (rc) {
     goto error;
@@ -993,28 +993,19 @@ int ha_sdb::extra(enum ha_extra_function operation) {
 
 void ha_sdb::check_thread() {
   int rc = 0;
-  if (cl->get_tid() != ha_thd()->thread_id())
-  // if ( cl->get_tid() != (my_thread_id)(ha_thd()->active_vio->mysql_socket.fd)
-  // )
-  {
-    // first_read = TRUE ;
-    // stats.records= 0;
-    Sdb_conn_auto_ptr conn_tmp;
-    rc = SDB_CONN_MGR_INST->get_sdb_conn(ha_thd()->thread_id(), conn_tmp);
-    // rc = SDB_CONN_MGR_INST->get_sdb_conn(
-    // (my_thread_id)(ha_thd()->active_vio->mysql_socket.fd),
-    //                                      conn_tmp ) ;
+  if (cl->get_tid() != ha_thd()->thread_id()) {
+    Sdb_conn *conn = check_sdb_in_thd(ha_thd(), true);
+    if (NULL == conn) {
+      rc = HA_ERR_NO_CONNECTION;
+      goto error;
+    }
+    DBUG_ASSERT(conn->get_tid() == ha_thd()->thread_id());
+
+    rc = conn->get_cl(db_name, table_name, cl);
     if (0 != rc) {
       goto error;
     }
 
-    rc = conn_tmp->get_cl(db_name, table_name, cl);
-    if (0 != rc) {
-      goto error;
-    }
-
-    connection = conn_tmp;
-    // fd = ha_thd()->active_vio->mysql_socket.fd ;
     fd = ha_thd()->thread_id();
   }
 done:
@@ -1040,6 +1031,7 @@ int ha_sdb::external_lock(THD *thd, int lock_type) {
 
   // TODO: generate transaction-id
   trans_register_ha(thd, true, ht, &trxid);
+
 done:
   return rc;
 error:
@@ -1243,7 +1235,7 @@ ha_rows ha_sdb::records_in_range(uint inx, key_range *min_key,
 
 int ha_sdb::delete_table(const char *from) {
   int rc = 0;
-  Sdb_conn_auto_ptr conn_tmp;
+  Sdb_conn *conn = NULL;
 
   rc = sdb_parse_table_name(from, db_name, SDB_CS_NAME_MAX_SIZE + 1, table_name,
                             SDB_CL_NAME_MAX_SIZE + 1);
@@ -1251,15 +1243,14 @@ int ha_sdb::delete_table(const char *from) {
     goto error;
   }
 
-  rc = SDB_CONN_MGR_INST->get_sdb_conn(ha_thd()->thread_id(), conn_tmp);
-  // rc = SDB_CONN_MGR_INST->get_sdb_conn(
-  // (my_thread_id)(ha_thd()->active_vio->mysql_socket.fd),
-  //                                      conn_tmp ) ;
-  if (0 != rc) {
+  conn = check_sdb_in_thd(ha_thd(), true);
+  if (NULL == conn) {
+    rc = HA_ERR_NO_CONNECTION;
     goto error;
   }
+  DBUG_ASSERT(conn->get_tid() == ha_thd()->thread_id());
 
-  rc = conn_tmp->get_cl(db_name, table_name, cl);
+  rc = conn->get_cl(db_name, table_name, cl);
   if (0 != rc) {
     int rc_tmp = get_sdb_code(rc);
     if (SDB_DMS_NOTEXIST == rc_tmp || SDB_DMS_CS_NOTEXIST == rc_tmp) {
@@ -1423,7 +1414,7 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
   int rc = 0;
   sdbCollectionSpace cs;
   uint str_field_len = 0;
-  Sdb_conn_auto_ptr conn_tmp;
+  Sdb_conn *conn = NULL;
   bson::BSONObj options;
   bson::BSONObj comments;
   my_bool use_partition = sdb_use_partition;
@@ -1466,34 +1457,30 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
     goto error;
   }
 
-  rc = SDB_CONN_MGR_INST->get_sdb_conn(ha_thd()->thread_id(), conn_tmp);
-  // rc = SDB_CONN_MGR_INST->get_sdb_conn(
-  // (my_thread_id)(ha_thd()->active_vio->mysql_socket.fd),
-  //                                      conn_tmp ) ;
-  if (0 != rc) {
+  conn = check_sdb_in_thd(ha_thd(), true);
+  if (NULL == conn) {
+    rc = HA_ERR_NO_CONNECTION;
     goto error;
   }
+  DBUG_ASSERT(conn->get_tid() == ha_thd()->thread_id());
 
   // TODO: get sdb_auto_split from configure
   if (use_partition) {
-    rc = conn_tmp->create_global_domain_cs(SDB_GLOBAL_DOMAIN_NAME, db_name);
+    rc = conn->create_global_domain_cs(SDB_GLOBAL_DOMAIN_NAME, db_name);
   }
   if (rc != 0) {
     goto error;
   }
 
-  rc = conn_tmp->create_cl(db_name, table_name, options);
+  rc = conn->create_cl(db_name, table_name, options);
   if (0 != rc) {
     goto error;
   }
 
-  rc = conn_tmp->get_cl(db_name, table_name, cl);
+  rc = conn->get_cl(db_name, table_name, cl);
   if (0 != rc) {
     goto error;
   }
-
-  connection = conn_tmp;
-  // fd = ha_thd()->active_vio->mysql_socket.fd ;
 
   for (uint i = 0; i < form->s->keys; i++) {
     rc = sdb_create_index(form->s->key_info + i, cl);
@@ -1633,19 +1620,18 @@ static int sdb_commit(
 {
   int rc = 0;
 
-  Sdb_conn_auto_ptr connection;
+  Sdb_conn *connection = NULL;
 
   if (!commit_trx) {
     goto done;
   }
 
-  rc = SDB_CONN_MGR_INST->get_sdb_conn(thd->thread_id(), connection);
-  // rc = SDB_CONN_MGR_INST->get_sdb_conn(
-  // (my_thread_id)(thd->active_vio->mysql_socket.fd),
-  //                                      connection ) ;
-  if (0 != rc) {
+  connection = check_sdb_in_thd(thd, true);
+  if (NULL == connection) {
+    rc = HA_ERR_NO_CONNECTION;
     goto error;
   }
+  DBUG_ASSERT(connection->get_tid() == thd->thread_id());
 
   rc = connection->commit_transaction();
 
@@ -1670,19 +1656,18 @@ static int sdb_rollback(
 {
   int rc = 0;
 
-  Sdb_conn_auto_ptr connection;
+  Sdb_conn *connection = NULL;
 
   if (!rollback_trx) {
     goto done;
   }
 
-  rc = SDB_CONN_MGR_INST->get_sdb_conn(thd->thread_id(), connection);
-  // rc = SDB_CONN_MGR_INST->get_sdb_conn(
-  // (my_thread_id)(thd->active_vio->mysql_socket.fd),
-  //                                      connection ) ;
-  if (0 != rc) {
+  connection = check_sdb_in_thd(thd, true);
+  if (NULL == connection) {
+    rc = HA_ERR_NO_CONNECTION;
     goto error;
   }
+  DBUG_ASSERT(connection->get_tid() == thd->thread_id());
 
   rc = connection->rollback_transaction();
 
@@ -1700,16 +1685,18 @@ error:
 static void sdb_drop_database(handlerton *hton, char *path) {
   int rc = 0;
   char db_name[SDB_CS_NAME_MAX_SIZE + 1] = {0};
-  Sdb_conn_auto_ptr connection;
+  Sdb_conn *connection = NULL;
   THD *thd = current_thd;
   if (NULL == thd) {
     goto error;
   }
 
-  rc = SDB_CONN_MGR_INST->get_sdb_conn(thd->thread_id(), connection);
-  if (rc != 0) {
+  connection = check_sdb_in_thd(thd, true);
+  if (NULL == connection) {
+    rc = HA_ERR_NO_CONNECTION;
     goto error;
   }
+  DBUG_ASSERT(connection->get_tid() == thd->thread_id());
 
   rc = sdb_get_db_name_from_path(path, db_name, SDB_CS_NAME_MAX_SIZE + 1);
   if (rc != 0) {
@@ -1727,8 +1714,16 @@ error:
   goto done;
 }
 
+static int sdb_close_connection(handlerton *hton, THD *thd) {
+  Thd_sdb *thd_sdb = thd_get_thd_sdb(thd);
+  if (NULL != thd_sdb) {
+    Thd_sdb::release(thd_sdb);
+    thd_set_thd_sdb(thd, NULL);
+  }
+  return 0;
+}
+
 static int sdb_init_func(void *p) {
-  handlerton *sdb_hton;
   Sdb_conn_addrs conn_addrs;
 #ifdef HAVE_PSI_INTERFACE
   init_sdb_psi_keys();
@@ -1744,6 +1739,7 @@ static int sdb_init_func(void *p) {
   sdb_hton->commit = sdb_commit;
   sdb_hton->rollback = sdb_rollback;
   sdb_hton->drop_database = sdb_drop_database;
+  sdb_hton->close_connection = sdb_close_connection;
   if (conn_addrs.parse_conn_addrs(sdb_conn_str)) {
     SDB_LOG_ERROR("Invalid value sequoiadb_conn_addr=%s", sdb_conn_str);
     return 1;

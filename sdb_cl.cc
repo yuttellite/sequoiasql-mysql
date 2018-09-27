@@ -17,19 +17,13 @@
 #include "sdb_cl.h"
 #include "sdb_cl_ptr.h"
 #include "sdb_conn.h"
-#include "sdb_conn_ptr.h"
 #include "sdb_err_code.h"
-#include "sdb_adaptor.h"
 
 using namespace sdbclient;
 
 Sdb_cl::Sdb_cl() {}
 
-Sdb_cl::~Sdb_cl() {
-  // assert( cursor.pCursor == NULL ) ;
-  // cursor.close() ;
-  // cursor.pCursor = NULL ;
-}
+Sdb_cl::~Sdb_cl() {}
 
 int Sdb_cl::init(Sdb_conn *connection, char *cs, char *cl) {
   int rc = SDB_ERR_OK;
@@ -200,11 +194,6 @@ int Sdb_cl::next(bson::BSONObj &obj) {
 done:
   return rc;
 error:
-  /*if ( cursor.pCursor != NULL )
-  {
-     delete cursor.pCursor ;
-     cursor.pCursor = NULL ;
-  }*/
   convert_sdb_code(rc);
   goto done;
 }
@@ -368,7 +357,6 @@ error:
 
 void Sdb_cl::close() {
   cursor.close();
-  // cursor.pCursor = NULL ;
 }
 
 my_thread_id Sdb_cl::get_tid() {
@@ -466,10 +454,7 @@ void Sdb_cl_auto_ptr::clear() {
     // only one in cl_list which in Sdb_conn,
     // then delete it from cl_list.
     if (NULL != ref_ptr->sdb_collection) {
-      /*Sdb_conn_auto_ptr tmp_conn = ref_ptr->sdb_collection->get_connection() ;
-      tmp_conn->clear_cl( ref_ptr->sdb_collection->get_cs_name(),
-                          ref_ptr->sdb_collection->get_cl_name() ) ;*/
-      SDB_CONN_MGR_INST->del_sdb_conn(ref_ptr->sdb_collection->get_tid());
+      // SDB_CONN_MGR_INST->del_sdb_conn(ref_ptr->sdb_collection->get_tid());
     }
   } else if (1 == ref_tmp) {
     delete ref_ptr;

@@ -15,7 +15,6 @@
 
 #include "handler.h"
 #include "client.hpp"
-#include "sdb_adaptor.h"
 #include "sdb_def.h"
 #include "sdb_cl_ptr.h"
 
@@ -262,7 +261,6 @@ class ha_sdb : public handler {
 
  private:
   THR_LOCK_DATA lock_data;
-  Sdb_conn_auto_ptr connection;
   Sdb_cl_auto_ptr cl;
   bool first_read;
   bson::BSONObj cur_rec;

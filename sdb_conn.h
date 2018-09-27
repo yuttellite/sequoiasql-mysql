@@ -22,7 +22,6 @@
 #include <atomic_class.h>
 #include "client.hpp"
 
-class Sdb_conn_auto_ptr;
 class Sdb_cl_auto_ptr;
 
 class Sdb_conn {

@@ -34,14 +34,14 @@ ha_sdb.cc
 sdb_conf.cc
 sdb_util.cc
 sdb_conn.cc
+sdb_thd.cc
 sdb_condition.cc
 sdb_item.cc
 sdb_cl.cc
-sdb_adaptor.cc
 sdb_err_code.cc
 sdb_log.cc
 sdb_idx.cc)
-   
+
 SET(WITH_SDB_DRIVER "" CACHE PATH "Path to SequoiaDB cpp driver")
 SET(SDB_DRIVER_PATH ${WITH_SDB_DRIVER})
 

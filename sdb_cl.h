@@ -19,9 +19,7 @@
 #include <mysql/psi/mysql_thread.h>
 #include "client.hpp"
 #include "sdb_def.h"
-#include "sdb_conn_ptr.h"
-
-class Sdb_conn_auto_ptr;
+#include "sdb_conn.h"
 
 class Sdb_cl {
  public:
