@@ -32,7 +32,7 @@ class Sdb_conn {
 
   sdbclient::sdb &get_sdb();
 
-  my_thread_id get_tid();
+  my_thread_id thread_id();
 
   int begin_transaction();
 
@@ -40,7 +40,7 @@ class Sdb_conn {
 
   int rollback_transaction();
 
-  bool is_transaction();
+  bool is_transaction_on();
 
   int get_cl(char *cs_name, char *cl_name, Sdb_cl &cl);
 
@@ -55,12 +55,12 @@ class Sdb_conn {
 
   int create_global_domain_cs(const char *domain_name, char *cs_name);
 
-  inline bool is_valid() { return connection.isValid(); }
+  inline bool is_valid() { return m_connection.isValid(); }
 
  private:
-  sdbclient::sdb connection;
-  bool transactionon;
-  my_thread_id tid;
+  sdbclient::sdb m_connection;
+  bool m_transaction_on;
+  my_thread_id m_thread_id;
 };
 
 #endif

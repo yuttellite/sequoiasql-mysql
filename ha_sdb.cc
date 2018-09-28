@@ -206,7 +206,7 @@ int ha_sdb::open(const char *name, int mode, uint test_if_locked) {
     rc = HA_ERR_NO_CONNECTION;
     goto error;
   }
-  DBUG_ASSERT(connection->get_tid() == ha_thd()->thread_id());
+  DBUG_ASSERT(connection->thread_id() == ha_thd()->thread_id());
 
   rc = connection->get_cl(db_name, table_name, cl);
   if (0 != rc) {
@@ -837,7 +837,7 @@ error:
 
 int ha_sdb::cur_row(uchar *buf) {
   int rc = 0;
-  DBUG_ASSERT(cl.get_tid() == ha_thd()->thread_id());
+  DBUG_ASSERT(cl.thread_id() == ha_thd()->thread_id());
   rc = cl.current(cur_rec);
   if (rc != 0) {
     goto error;
@@ -883,7 +883,7 @@ int ha_sdb::rnd_next(uchar *buf) {
     }
     first_read = FALSE;
   }
-  DBUG_ASSERT(cl.get_tid() == ha_thd()->thread_id());
+  DBUG_ASSERT(cl.thread_id() == ha_thd()->thread_id());
 
   ha_statistic_increment(&SSV::ha_read_rnd_next_count);
   rc = next_row(cur_rec, buf);
@@ -904,7 +904,7 @@ int ha_sdb::rnd_pos(uchar *buf, uchar *pos) {
   objBuilder.appendOID("_id", &tmpOid);
   bson::BSONObj oidObj = objBuilder.obj();
 
-  DBUG_ASSERT(cl.get_tid() == ha_thd()->thread_id());
+  DBUG_ASSERT(cl.thread_id() == ha_thd()->thread_id());
 
   rc = cl.query_one(cur_rec, oidObj);
   if (rc) {
@@ -993,13 +993,13 @@ int ha_sdb::extra(enum ha_extra_function operation) {
 
 void ha_sdb::check_thread() {
   int rc = 0;
-  if (cl.get_tid() != ha_thd()->thread_id()) {
+  if (cl.thread_id() != ha_thd()->thread_id()) {
     Sdb_conn *conn = check_sdb_in_thd(ha_thd(), true);
     if (NULL == conn) {
       rc = HA_ERR_NO_CONNECTION;
       goto error;
     }
-    DBUG_ASSERT(conn->get_tid() == ha_thd()->thread_id());
+    DBUG_ASSERT(conn->thread_id() == ha_thd()->thread_id());
 
     rc = conn->get_cl(db_name, table_name, cl);
     if (0 != rc) {
@@ -1011,33 +1011,74 @@ void ha_sdb::check_thread() {
 done:
   return;
 error:
-  assert(FALSE);
+  DBUG_ASSERT(FALSE);
+  goto done;
+}
+
+int ha_sdb::start_statement(THD *thd, uint table_count) {
+  int rc = 0;
+
+  if (0 == table_count) {
+    if (thd_test_options(thd, OPTION_BEGIN)) {
+      Sdb_conn *conn = check_sdb_in_thd(thd, true);
+      if (NULL == conn) {
+        rc = HA_ERR_NO_CONNECTION;
+        goto error;
+      }
+      DBUG_ASSERT(conn->thread_id() == thd->thread_id());
+
+      rc = conn->begin_transaction();
+      if (rc != 0) {
+        goto error;
+      }
+      trans_register_ha(thd, TRUE, ht, NULL);
+    }
+
+    // TODO: AUTOCOMMIT
+
+  } else {
+    // there is more than one handler involved
+  }
+
+done:
+  return rc;
+error:
   goto done;
 }
 
 int ha_sdb::external_lock(THD *thd, int lock_type) {
   int rc = 0;
-  Sdb_conn *conn = NULL;
+  Thd_sdb *thd_sdb = NULL;
 
-  ulonglong trxid = thd->thread_id();
-  if (!thd_test_options(thd, OPTION_BEGIN)) {
-    goto done;
-  }
-
-  conn = check_sdb_in_thd(thd, true);
-  if (NULL == conn) {
+  if (NULL == check_sdb_in_thd(thd)) {
     rc = HA_ERR_NO_CONNECTION;
     goto error;
   }
-  DBUG_ASSERT(conn->get_tid() == thd->thread_id());
 
-  rc = conn->begin_transaction();
-  if (rc != 0) {
-    goto error;
+  thd_sdb = thd_get_thd_sdb(thd);
+
+  if (F_UNLCK != lock_type) {
+    rc = start_statement(thd, thd_sdb->lock_count++);
+    if (0 != rc) {
+      thd_sdb->lock_count--;
+      goto error;
+    }
+  } else {
+    if (!--thd_sdb->lock_count) {
+      if (!(thd_test_options(thd, OPTION_BEGIN)) &&
+          thd_sdb->get_conn()->is_transaction_on()) {
+        /*
+          Unlock is done without a transaction commit / rollback.
+          This happens if the thread didn't update any rows
+          We must in this case close the transaction to release resources
+        */
+        rc = thd_sdb->get_conn()->commit_transaction();
+        if (0 != rc) {
+          goto error;
+        }
+      }
+    }
   }
-
-  // TODO: generate transaction-id
-  trans_register_ha(thd, true, ht, &trxid);
 
 done:
   return rc;
@@ -1046,7 +1087,15 @@ error:
 }
 
 int ha_sdb::start_stmt(THD *thd, thr_lock_type lock_type) {
-  return external_lock(thd, lock_type);
+  int rc = 0;
+  Thd_sdb *thd_sdb = thd_get_thd_sdb(thd);
+
+  rc = start_statement(thd, thd_sdb->start_stmt_count++);
+  if (0 != rc) {
+    thd_sdb->start_stmt_count--;
+  }
+
+  return rc;
 }
 
 enum_alter_inplace_result ha_sdb::check_if_supported_inplace_alter(
@@ -1214,12 +1263,12 @@ error:
   goto done;
 }
 
-int ha_sdb::delete_all_rows(void) {
+int ha_sdb::delete_all_rows() {
   check_thread();
-  if (cl.is_transaction()) {
+  if (cl.is_transaction_on()) {
     return cl.del();
   }
-  return this->truncate();
+  return truncate();
 }
 
 int ha_sdb::truncate() {
@@ -1255,7 +1304,7 @@ int ha_sdb::delete_table(const char *from) {
     rc = HA_ERR_NO_CONNECTION;
     goto error;
   }
-  DBUG_ASSERT(conn->get_tid() == ha_thd()->thread_id());
+  DBUG_ASSERT(conn->thread_id() == ha_thd()->thread_id());
 
   rc = conn->drop_cl(db_name, table_name);
   if (0 != rc) {
@@ -1462,7 +1511,7 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
     rc = HA_ERR_NO_CONNECTION;
     goto error;
   }
-  DBUG_ASSERT(conn->get_tid() == ha_thd()->thread_id());
+  DBUG_ASSERT(conn->thread_id() == ha_thd()->thread_id());
 
   // TODO: get sdb_auto_split from configure
   if (use_partition) {
@@ -1631,12 +1680,15 @@ static int sdb_commit(
     rc = HA_ERR_NO_CONNECTION;
     goto error;
   }
-  DBUG_ASSERT(connection->get_tid() == thd->thread_id());
+  DBUG_ASSERT(connection->thread_id() == thd->thread_id());
 
-  rc = connection->commit_transaction();
+  thd_get_thd_sdb(thd)->start_stmt_count = 0;
 
-  if (0 != rc) {
-    goto error;
+  if (connection->is_transaction_on()) {
+    rc = connection->commit_transaction();
+    if (0 != rc) {
+      goto error;
+    }
   }
 
 done:
@@ -1667,12 +1719,15 @@ static int sdb_rollback(
     rc = HA_ERR_NO_CONNECTION;
     goto error;
   }
-  DBUG_ASSERT(connection->get_tid() == thd->thread_id());
+  DBUG_ASSERT(connection->thread_id() == thd->thread_id());
 
-  rc = connection->rollback_transaction();
+  thd_get_thd_sdb(thd)->start_stmt_count = 0;
 
-  if (0 != rc) {
-    goto error;
+  if (connection->is_transaction_on()) {
+    rc = connection->rollback_transaction();
+    if (0 != rc) {
+      goto error;
+    }
   }
 
 done:
@@ -1696,7 +1751,7 @@ static void sdb_drop_database(handlerton *hton, char *path) {
     rc = HA_ERR_NO_CONNECTION;
     goto error;
   }
-  DBUG_ASSERT(connection->get_tid() == thd->thread_id());
+  DBUG_ASSERT(connection->thread_id() == thd->thread_id());
 
   rc = sdb_get_db_name_from_path(path, db_name, SDB_CS_NAME_MAX_SIZE + 1);
   if (rc != 0) {

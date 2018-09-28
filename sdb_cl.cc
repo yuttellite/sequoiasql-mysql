@@ -20,7 +20,7 @@
 
 using namespace sdbclient;
 
-Sdb_cl::Sdb_cl() : p_conn(NULL), thread_id(0) {}
+Sdb_cl::Sdb_cl() : p_conn(NULL), m_thread_id(0) {}
 
 Sdb_cl::~Sdb_cl() {
   close();
@@ -34,7 +34,7 @@ int Sdb_cl::init(Sdb_conn *connection, char *cs, char *cl) {
   }
 
   p_conn = connection;
-  thread_id = connection->get_tid();
+  m_thread_id = connection->thread_id();
 
   cs_name[SDB_CS_NAME_MAX_SIZE] = 0;
   strncpy(cs_name, cs, SDB_CS_NAME_MAX_SIZE);
@@ -70,7 +70,7 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction();
+    bool is_transaction = p_conn->is_transaction_on();
     if (!is_transaction && retry_times-- > 0 && 0 == p_conn->connect()) {
       goto retry;
     }
@@ -86,8 +86,8 @@ int Sdb_cl::check_connect(int rc) {
   return SDB_ERR_OK;
 }
 
-bool Sdb_cl::is_transaction() {
-  return p_conn->is_transaction();
+bool Sdb_cl::is_transaction_on() {
+  return p_conn->is_transaction_on();
 }
 
 char *Sdb_cl::get_cs_name() {
@@ -114,7 +114,7 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction();
+    bool is_transaction = p_conn->is_transaction_on();
     if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
@@ -146,7 +146,7 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction();
+    bool is_transaction = p_conn->is_transaction_on();
     if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
@@ -201,7 +201,7 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction();
+    bool is_transaction = p_conn->is_transaction_on();
     if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
@@ -224,7 +224,7 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction();
+    bool is_transaction = p_conn->is_transaction_on();
     if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
@@ -246,7 +246,7 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction();
+    bool is_transaction = p_conn->is_transaction_on();
     if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
@@ -267,7 +267,7 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction();
+    bool is_transaction = p_conn->is_transaction_on();
     if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
@@ -292,7 +292,7 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction();
+    bool is_transaction = p_conn->is_transaction_on();
     if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
@@ -316,7 +316,7 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction();
+    bool is_transaction = p_conn->is_transaction_on();
     if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
@@ -337,7 +337,7 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction();
+    bool is_transaction = p_conn->is_transaction_on();
     if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
@@ -350,8 +350,8 @@ void Sdb_cl::close() {
   cursor.close();
 }
 
-my_thread_id Sdb_cl::get_tid() {
-  return thread_id;
+my_thread_id Sdb_cl::thread_id() {
+  return m_thread_id;
 }
 
 int Sdb_cl::drop() {
@@ -370,7 +370,7 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction();
+    bool is_transaction = p_conn->is_transaction_on();
     if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
@@ -391,7 +391,7 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction();
+    bool is_transaction = p_conn->is_transaction_on();
     if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }

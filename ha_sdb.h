@@ -207,6 +207,7 @@ class ha_sdb : public handler {
   int info(uint);
   int extra(enum ha_extra_function operation);
   int external_lock(THD *thd, int lock_type);
+  int start_statement(THD *thd, uint table_count);
   int delete_all_rows(void);
   int truncate();
   ha_rows records_in_range(uint inx, key_range *min_key, key_range *max_key);

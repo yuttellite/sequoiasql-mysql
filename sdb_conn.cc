@@ -25,27 +25,28 @@
 #include "sdb_util.h"
 #include "sdb_err_code.h"
 
-Sdb_conn::Sdb_conn(my_thread_id _tid) : transactionon(false), tid(_tid) {}
+Sdb_conn::Sdb_conn(my_thread_id _tid)
+    : m_transaction_on(false), m_thread_id(_tid) {}
 
 Sdb_conn::~Sdb_conn() {}
 
 sdbclient::sdb &Sdb_conn::get_sdb() {
-  return connection;
+  return m_connection;
 }
 
-my_thread_id Sdb_conn::get_tid() {
-  return tid;
+my_thread_id Sdb_conn::thread_id() {
+  return m_thread_id;
 }
 
 int Sdb_conn::connect() {
   int rc = SDB_ERR_OK;
-  if (!connection.isValid()) {
-    transactionon = false;
+  if (!m_connection.isValid()) {
+    m_transaction_on = false;
     Sdb_conn_addrs conn_addrs;
     int tmp_rc = conn_addrs.parse_conn_addrs(sdb_conn_str);
     DBUG_ASSERT(tmp_rc == 0);
-    rc = connection.connect(conn_addrs.get_conn_addrs(),
-                            conn_addrs.get_conn_num(), "", "");
+    rc = m_connection.connect(conn_addrs.get_conn_addrs(),
+                              conn_addrs.get_conn_num(), "", "");
     if (rc != SDB_ERR_OK) {
       goto error;
     }
@@ -61,10 +62,10 @@ error:
 int Sdb_conn::begin_transaction() {
   int rc = SDB_ERR_OK;
   int retry_times = 2;
-  while (!transactionon) {
-    rc = connection.transactionBegin();
+  while (!m_transaction_on) {
+    rc = m_connection.transactionBegin();
     if (SDB_ERR_OK == rc) {
-      transactionon = true;
+      m_transaction_on = true;
       break;
     } else if (IS_SDB_NET_ERR(rc) && --retry_times > 0) {
       connect();
@@ -82,9 +83,9 @@ error:
 
 int Sdb_conn::commit_transaction() {
   int rc = SDB_ERR_OK;
-  if (transactionon) {
-    transactionon = false;
-    rc = connection.transactionCommit();
+  if (m_transaction_on) {
+    m_transaction_on = false;
+    rc = m_connection.transactionCommit();
     if (rc != SDB_ERR_OK) {
       goto error;
     }
@@ -101,10 +102,10 @@ error:
 }
 
 int Sdb_conn::rollback_transaction() {
-  if (transactionon) {
+  if (m_transaction_on) {
     int rc = SDB_ERR_OK;
-    transactionon = false;
-    rc = connection.transactionRollback();
+    m_transaction_on = false;
+    rc = m_connection.transactionRollback();
     if (IS_SDB_NET_ERR(rc)) {
       connect();
     }
@@ -112,8 +113,8 @@ int Sdb_conn::rollback_transaction() {
   return 0;
 }
 
-bool Sdb_conn::is_transaction() {
-  return transactionon;
+bool Sdb_conn::is_transaction_on() {
+  return m_transaction_on;
 }
 
 int Sdb_conn::get_cl(char *cs_name, char *cl_name, Sdb_cl &cl) {
@@ -143,9 +144,9 @@ int Sdb_conn::create_cl(char *cs_name, char *cl_name,
   sdbclient::sdbCollection cl;
 
 retry:
-  rc = connection.createCollectionSpace(cs_name, 4096, cs);
+  rc = m_connection.createCollectionSpace(cs_name, 4096, cs);
   if (SDB_DMS_CS_EXIST == rc) {
-    rc = connection.getCollectionSpace(cs_name, cs);
+    rc = m_connection.getCollectionSpace(cs_name, cs);
   }
   if (rc != SDB_ERR_OK) {
     goto error;
@@ -163,7 +164,7 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    if (!transactionon && retry_times-- > 0 && 0 == connect()) {
+    if (!m_transaction_on && retry_times-- > 0 && 0 == connect()) {
       goto retry;
     }
   }
@@ -173,7 +174,7 @@ error:
 
 int Sdb_conn::drop_cs(char *cs_name) {
   int rc = SDB_ERR_OK;
-  rc = connection.dropCollectionSpace(cs_name);
+  rc = m_connection.dropCollectionSpace(cs_name);
   if (rc != SDB_ERR_OK) {
     goto error;
   }
@@ -193,7 +194,7 @@ int Sdb_conn::drop_cl(char *cs_name, char *cl_name) {
   sdbclient::sdbCollectionSpace cs;
 
 retry:
-  rc = connection.getCollectionSpace(cs_name, cs);
+  rc = m_connection.getCollectionSpace(cs_name, cs);
   if (rc != SDB_ERR_OK) {
     goto error;
   }
@@ -222,7 +223,7 @@ int Sdb_conn::create_global_domain(const char *domain_name) {
   bson::BSONObjBuilder obj_builder;
   BOOLEAN has_rg = FALSE;
 
-  rc = connection.getDomain(domain_name, domain);
+  rc = m_connection.getDomain(domain_name, domain);
   if (SDB_ERR_OK == rc) {
     goto done;
   }
@@ -230,7 +231,7 @@ int Sdb_conn::create_global_domain(const char *domain_name) {
     goto error;
   }
 
-  rc = connection.listReplicaGroups(cursor);
+  rc = m_connection.listReplicaGroups(cursor);
   if (rc != SDB_ERR_OK) {
     goto error;
   }
@@ -254,7 +255,7 @@ int Sdb_conn::create_global_domain(const char *domain_name) {
   obj_builder.appendArray("Groups", rg_list.arr());
   obj_builder.append("AutoSplit", true);
 
-  rc = connection.createDomain(domain_name, obj_builder.obj(), domain);
+  rc = m_connection.createDomain(domain_name, obj_builder.obj(), domain);
   if (SDB_CAT_DOMAIN_EXIST == rc) {
     rc = SDB_ERR_OK;
   }
@@ -283,7 +284,7 @@ int Sdb_conn::create_global_domain_cs(const char *domain_name, char *cs_name) {
   }
 
   options = BSON("Domain" << domain_name);
-  rc = connection.createCollectionSpace(cs_name, options, cs);
+  rc = m_connection.createCollectionSpace(cs_name, options, cs);
   if (SDB_DMS_CS_EXIST == rc) {
     rc = SDB_ERR_OK;
   }
