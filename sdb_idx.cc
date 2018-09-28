@@ -19,7 +19,7 @@
 
 #include "sdb_idx.h"
 #include "sdb_cl.h"
-#include "sdb_err_code.h"
+#include "sdb_errcode.h"
 #include "sdb_def.h"
 #include "sdb_log.h"
 #include "sdb_util.h"

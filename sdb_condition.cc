@@ -18,7 +18,7 @@
 #endif
 
 #include "sdb_condition.h"
-#include "sdb_err_code.h"
+#include "sdb_errcode.h"
 
 Sdb_cond_ctx::Sdb_cond_ctx() {
   cur_item = NULL;

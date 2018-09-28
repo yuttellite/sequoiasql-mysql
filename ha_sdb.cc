@@ -31,7 +31,7 @@
 #include "sdb_thd.h"
 #include "sdb_util.h"
 #include "sdb_condition.h"
-#include "sdb_err_code.h"
+#include "sdb_errcode.h"
 #include "sdb_idx.h"
 
 using namespace sdbclient;
@@ -426,7 +426,7 @@ int ha_sdb::write_row(uchar *buf) {
   rc = cl.insert(obj);
 
   // ignore duplicate key
-  if (SDB_ERR_INNER_CODE_END + SDB_IXM_DUP_KEY == rc && ha_thd()->lex &&
+  if (SDB_IXM_DUP_KEY == get_sdb_code(rc) && ha_thd()->lex &&
       ha_thd()->lex->is_ignore()) {
     rc = HA_ERR_FOUND_DUPP_KEY;
   }
@@ -461,7 +461,7 @@ int ha_sdb::update_row(const uchar *old_data, uchar *new_data) {
   rc = cl.update(rule_obj, cur_rec);
 
   // ignore duplicate key
-  if (SDB_ERR_INNER_CODE_END + SDB_IXM_DUP_KEY == rc && ha_thd()->lex &&
+  if (SDB_IXM_DUP_KEY == get_sdb_code(rc) && ha_thd()->lex &&
       ha_thd()->lex->is_ignore()) {
     rc = HA_ERR_FOUND_DUPP_KEY;
   }
@@ -1308,11 +1308,6 @@ int ha_sdb::delete_table(const char *from) {
 
   rc = conn->drop_cl(db_name, table_name);
   if (0 != rc) {
-    int rc_tmp = get_sdb_code(rc);
-    if (SDB_DMS_NOTEXIST == rc_tmp || SDB_DMS_CS_NOTEXIST == rc_tmp) {
-      rc = 0;
-      goto done;
-    }
     goto error;
   }
 

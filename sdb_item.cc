@@ -19,7 +19,7 @@
 
 #include <my_dbug.h>
 #include "sdb_item.h"
-#include "sdb_err_code.h"
+#include "sdb_errcode.h"
 #include "sdb_util.h"
 #include "sdb_def.h"
 

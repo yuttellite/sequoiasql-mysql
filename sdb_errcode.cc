@@ -13,17 +13,17 @@
   along with this program; if not, write to the Free Software
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
-#include "sdb_err_code.h"
+#include "sdb_errcode.h"
 
 void convert_sdb_code(int &rc) {
   if (rc < 0) {
-    rc += SDB_ERR_INNER_CODE_END;
+    rc = SDB_ERR_INNER_CODE_BEGIN - rc;
   }
 }
 
 int get_sdb_code(int rc) {
   if (rc > SDB_ERR_INNER_CODE_BEGIN && rc < SDB_ERR_INNER_CODE_END) {
-    return rc - SDB_ERR_INNER_CODE_END;
+    return SDB_ERR_INNER_CODE_BEGIN - rc;
   }
   return rc;
 }

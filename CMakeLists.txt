@@ -38,7 +38,7 @@ sdb_thd.cc
 sdb_condition.cc
 sdb_item.cc
 sdb_cl.cc
-sdb_err_code.cc
+sdb_errcode.cc
 sdb_log.cc
 sdb_idx.cc)
 

@@ -17,7 +17,7 @@
 #include "sql_table.h"
 #include "sdb_util.h"
 #include "sdb_log.h"
-#include "sdb_err_code.h"
+#include "sdb_errcode.h"
 #include "mysqld.h"
 #include <string.h>
 

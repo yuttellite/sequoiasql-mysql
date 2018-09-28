@@ -19,7 +19,7 @@
 #include <client.hpp>
 #include <item.h>
 #include <item_cmpfunc.h>
-#include "sdb_err_code.h"
+#include "sdb_errcode.h"
 
 class Sdb_item : public Sql_alloc {
  public:

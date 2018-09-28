@@ -15,7 +15,7 @@
 
 #include "sdb_thd.h"
 #include "sdb_log.h"
-#include "sdb_err_code.h"
+#include "sdb_errcode.h"
 
 Thd_sdb::Thd_sdb(THD* thd)
     : m_thd(thd),

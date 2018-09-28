@@ -23,7 +23,7 @@
 #include "sdb_cl.h"
 #include "sdb_conf.h"
 #include "sdb_util.h"
-#include "sdb_err_code.h"
+#include "sdb_errcode.h"
 
 Sdb_conn::Sdb_conn(my_thread_id _tid)
     : m_transaction_on(false), m_thread_id(_tid) {}
@@ -196,11 +196,21 @@ int Sdb_conn::drop_cl(char *cs_name, char *cl_name) {
 retry:
   rc = m_connection.getCollectionSpace(cs_name, cs);
   if (rc != SDB_ERR_OK) {
+    if (SDB_DMS_CS_NOTEXIST == rc) {
+      // There is no specified collection space, igonre the error.
+      rc = 0;
+      goto done;
+    }
     goto error;
   }
 
   rc = cs.dropCollection(cl_name);
   if (rc != SDB_ERR_OK) {
+    if (SDB_DMS_NOTEXIST == rc) {
+      // There is no specified collection, igonre the error.
+      rc = 0;
+      goto done;
+    }
     goto error;
   }
 
