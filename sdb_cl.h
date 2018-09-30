@@ -27,15 +27,13 @@ class Sdb_cl {
 
   ~Sdb_cl();
 
-  int init(Sdb_conn *connection, char *cs, char *cl);
-
-  int re_init();
+  int init(Sdb_conn *connection, char *cs_name, char *cl_name);
 
   bool is_transaction_on();
 
-  char *get_cs_name();
+  const char *get_cs_name();
 
-  char *get_cl_name();
+  const char *get_cl_name();
 
   int query(const bson::BSONObj &condition = sdbclient::_sdbStaticObject,
             const bson::BSONObj &selected = sdbclient::_sdbStaticObject,
@@ -78,7 +76,7 @@ class Sdb_cl {
 
   int truncate();
 
-  void close();  // close cursor
+  void close();  // close m_cursor
 
   my_thread_id thread_id();
 
@@ -87,14 +85,9 @@ class Sdb_cl {
   int get_count(long long &count);
 
  private:
-  int check_connect(int rc);
-
- private:
-  Sdb_conn *p_conn;
+  Sdb_conn *m_conn;
   my_thread_id m_thread_id;
-  sdbclient::sdbCollection cl;
-  sdbclient::sdbCursor cursor;
-  char cs_name[SDB_CS_NAME_MAX_SIZE + 1];
-  char cl_name[SDB_CL_NAME_MAX_SIZE + 1];
+  sdbclient::sdbCollection m_cl;
+  sdbclient::sdbCursor m_cursor;
 };
 #endif

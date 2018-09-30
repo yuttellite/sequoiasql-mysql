@@ -131,6 +131,7 @@ ha_sdb::ha_sdb(handlerton *hton, TABLE_SHARE *table_arg)
     : handler(hton, table_arg) {
   keynr = -1;
   share = NULL;
+  collection = NULL;
   first_read = TRUE;
   used_times = 0;
   memset(db_name, 0, SDB_CS_NAME_MAX_SIZE + 1);
@@ -140,6 +141,7 @@ ha_sdb::ha_sdb(handlerton *hton, TABLE_SHARE *table_arg)
 
 ha_sdb::~ha_sdb() {
   free_root(&blobroot, MYF(0));
+  DBUG_ASSERT(NULL == collection);
 }
 
 const char **ha_sdb::bas_ext() const {
@@ -188,6 +190,7 @@ int ha_sdb::open(const char *name, int mode, uint test_if_locked) {
   int rc = 0;
   ref_length = SDB_ID_STR_LEN + 1;  // length of _id
   Sdb_conn *connection = NULL;
+  Sdb_cl cl;
 
   if (!(share = get_sdb_share(name, table))) {
     rc = SDB_ERR_OOM;
@@ -208,6 +211,7 @@ int ha_sdb::open(const char *name, int mode, uint test_if_locked) {
   }
   DBUG_ASSERT(connection->thread_id() == ha_thd()->thread_id());
 
+  // Get collection to check if the collection is available.
   rc = connection->get_cl(db_name, table_name, cl);
   if (0 != rc) {
     SDB_LOG_ERROR("Collection[%s.%s] is not available. rc: %d", db_name,
@@ -216,7 +220,6 @@ int ha_sdb::open(const char *name, int mode, uint test_if_locked) {
   }
 
   thr_lock_data_init(&share->lock, &lock_data, (void *)this);
-  fd = ha_thd()->thread_id();
 
 done:
   return rc;
@@ -229,10 +232,21 @@ error:
 }
 
 int ha_sdb::close(void) {
-  cl.close();
+  if (NULL != collection) {
+    delete collection;
+    collection = NULL;
+  }
   if (share) {
     free_sdb_share(share);
     share = NULL;
+  }
+  return 0;
+}
+
+int ha_sdb::reset() {
+  if (NULL != collection) {
+    delete collection;
+    collection = NULL;
   }
   return 0;
 }
@@ -416,14 +430,16 @@ int ha_sdb::write_row(uchar *buf) {
   int rc = 0;
   bson::BSONObj obj, tmp_obj;
   ha_statistic_increment(&SSV::ha_write_count);
-  check_thread();
+
+  DBUG_ASSERT(NULL != collection);
+  DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
 
   rc = row_to_obj(buf, obj, FALSE, tmp_obj);
   if (rc != 0) {
     goto error;
   }
 
-  rc = cl.insert(obj);
+  rc = collection->insert(obj);
 
   // ignore duplicate key
   if (SDB_IXM_DUP_KEY == get_sdb_code(rc) && ha_thd()->lex &&
@@ -444,7 +460,9 @@ error:
 int ha_sdb::update_row(const uchar *old_data, uchar *new_data) {
   int rc = 0;
   bson::BSONObj old_obj, new_obj, rule_obj, null_obj;
-  check_thread();
+
+  DBUG_ASSERT(NULL != collection);
+  DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
 
   ha_statistic_increment(&SSV::ha_update_count);
 
@@ -458,7 +476,7 @@ int ha_sdb::update_row(const uchar *old_data, uchar *new_data) {
   }
 
   rule_obj = BSON("$set" << new_obj << "$unset" << null_obj);
-  rc = cl.update(rule_obj, cur_rec);
+  rc = collection->update(rule_obj, cur_rec);
 
   // ignore duplicate key
   if (SDB_IXM_DUP_KEY == get_sdb_code(rc) && ha_thd()->lex &&
@@ -478,11 +496,13 @@ error:
 int ha_sdb::delete_row(const uchar *buf) {
   int rc = 0;
   bson::BSONObj obj;
-  check_thread();
+
+  DBUG_ASSERT(NULL != collection);
+  DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
 
   ha_statistic_increment(&SSV::ha_delete_count);
 
-  rc = cl.del(cur_rec);
+  rc = collection->del(cur_rec);
   if (rc != 0) {
     goto error;
   }
@@ -493,10 +513,12 @@ error:
 }
 
 int ha_sdb::index_next(uchar *buf) {
-  assert(idx_order_direction == 1);
-
   int rc = 0;
+
+  DBUG_ASSERT(idx_order_direction == 1);
+
   ha_statistic_increment(&SSV::ha_read_next_count);
+
   rc = next_row(cur_rec, buf);
   if (rc != 0) {
     goto error;
@@ -509,10 +531,12 @@ error:
 }
 
 int ha_sdb::index_prev(uchar *buf) {
-  assert(idx_order_direction == -1);
-
   int rc = 0;
+
+  DBUG_ASSERT(idx_order_direction == -1);
+
   ha_statistic_increment(&SSV::ha_read_prev_count);
+
   rc = next_row(cur_rec, buf);
   if (rc != 0) {
     goto error;
@@ -595,6 +619,9 @@ int ha_sdb::index_read_one(bson::BSONObj condition, int order_direction,
   KEY *idx_key = NULL;
   const char *idx_name = NULL;
 
+  DBUG_ASSERT(NULL != collection);
+  DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
+
   idx_key = table->key_info + keynr;
   idx_name = sdb_get_idx_name(idx_key);
   if (idx_name) {
@@ -612,13 +639,15 @@ int ha_sdb::index_read_one(bson::BSONObj condition, int order_direction,
     goto error;
   }
 
-  rc = cl.query(condition, sdbclient::_sdbStaticObject, order_by, hint);
+  rc =
+      collection->query(condition, sdbclient::_sdbStaticObject, order_by, hint);
   if (rc) {
     SDB_LOG_ERROR(
         "Collection[%s.%s] failed to query with "
         "condition[%s], order[%s], hint[%s]. rc: %d",
-        cl.get_cs_name(), cl.get_cl_name(), condition.toString().c_str(),
-        order_by.toString().c_str(), hint.toString().c_str(), rc);
+        collection->get_cs_name(), collection->get_cl_name(),
+        condition.toString().c_str(), order_by.toString().c_str(),
+        hint.toString().c_str(), rc);
     goto error;
   }
 
@@ -658,7 +687,9 @@ int ha_sdb::index_init(uint idx, bool sorted) {
 }
 
 int ha_sdb::index_end() {
-  cl.close();
+  DBUG_ASSERT(NULL != collection);
+  DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
+  collection->close();
   keynr = -1;
   return 0;
 }
@@ -684,7 +715,9 @@ int ha_sdb::rnd_init(bool scan) {
 }
 
 int ha_sdb::rnd_end() {
-  cl.close();
+  DBUG_ASSERT(NULL != collection);
+  DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
+  collection->close();
   return 0;
 }
 
@@ -837,15 +870,20 @@ error:
 
 int ha_sdb::cur_row(uchar *buf) {
   int rc = 0;
-  DBUG_ASSERT(cl.thread_id() == ha_thd()->thread_id());
-  rc = cl.current(cur_rec);
+
+  DBUG_ASSERT(NULL != collection);
+  DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
+
+  rc = collection->current(cur_rec);
   if (rc != 0) {
     goto error;
   }
+
   rc = obj_to_row(cur_rec, buf);
   if (rc != 0) {
     goto error;
   }
+
 done:
   return rc;
 error:
@@ -854,18 +892,25 @@ error:
 
 int ha_sdb::next_row(bson::BSONObj &obj, uchar *buf) {
   int rc = 0;
-  rc = cl.next(obj);
+
+  DBUG_ASSERT(NULL != collection);
+  DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
+
+  rc = collection->next(obj);
   if (rc != 0) {
     if (HA_ERR_END_OF_FILE == rc) {
       table->status = STATUS_NOT_FOUND;
     }
     goto error;
   }
+
   rc = obj_to_row(obj, buf);
   if (rc != 0) {
     goto error;
   }
+
   table->status = 0;
+
 done:
   return rc;
 error:
@@ -874,23 +919,27 @@ error:
 
 int ha_sdb::rnd_next(uchar *buf) {
   int rc = 0;
+
+  DBUG_ASSERT(NULL != collection);
+  DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
+
   if (first_read) {
-    check_thread();
-    rc = cl.query(condition);
+    rc = collection->query(condition);
     condition = empty_obj;
     if (rc != 0) {
       goto error;
     }
     first_read = FALSE;
   }
-  DBUG_ASSERT(cl.thread_id() == ha_thd()->thread_id());
 
   ha_statistic_increment(&SSV::ha_read_rnd_next_count);
+
   rc = next_row(cur_rec, buf);
   if (rc != 0) {
     goto error;
   }
   stats.records++;
+
 done:
   return rc;
 error:
@@ -904,9 +953,10 @@ int ha_sdb::rnd_pos(uchar *buf, uchar *pos) {
   objBuilder.appendOID("_id", &tmpOid);
   bson::BSONObj oidObj = objBuilder.obj();
 
-  DBUG_ASSERT(cl.thread_id() == ha_thd()->thread_id());
+  DBUG_ASSERT(NULL != collection);
+  DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
 
-  rc = cl.query_one(cur_rec, oidObj);
+  rc = collection->query_one(cur_rec, oidObj);
   if (rc) {
     goto error;
   }
@@ -940,8 +990,13 @@ void ha_sdb::position(const uchar *record) {
 int ha_sdb::info(uint flag) {
   int rc = 0;
 
+  rc = ensure_collection(ha_thd());
+  if (0 != rc) {
+    goto error;
+  }
+
   if (used_times++ % 100 == 0) {
-    rc = cl.get_count(rec_num);
+    rc = collection->get_count(rec_num);
     if (rc != 0) {
       goto error;
     }
@@ -951,7 +1006,7 @@ int ha_sdb::info(uint flag) {
     time_t cur_time = time(NULL);
     // flush rec_num every 5 minutes
     if (difftime(cur_time, last_flush_time) > 5 * 60) {
-      rc = cl.get_count(rec_num);
+      rc = collection->get_count(rec_num);
       if (rc != 0) {
         goto error;
       }
@@ -991,32 +1046,52 @@ int ha_sdb::extra(enum ha_extra_function operation) {
   return 0;
 }
 
-void ha_sdb::check_thread() {
+int ha_sdb::ensure_collection(THD *thd) {
   int rc = 0;
-  if (cl.thread_id() != ha_thd()->thread_id()) {
-    Sdb_conn *conn = check_sdb_in_thd(ha_thd(), true);
+  DBUG_ASSERT(NULL != thd);
+
+  if (NULL != collection && collection->thread_id() != thd->thread_id()) {
+    delete collection;
+    collection = NULL;
+  }
+
+  if (NULL == collection) {
+    Sdb_conn *conn = check_sdb_in_thd(thd, true);
     if (NULL == conn) {
       rc = HA_ERR_NO_CONNECTION;
       goto error;
     }
-    DBUG_ASSERT(conn->thread_id() == ha_thd()->thread_id());
+    DBUG_ASSERT(conn->thread_id() == thd->thread_id());
 
-    rc = conn->get_cl(db_name, table_name, cl);
-    if (0 != rc) {
+    collection = new (std::nothrow) Sdb_cl();
+    if (NULL == collection) {
+      rc = SDB_ERR_OOM;
       goto error;
     }
 
-    fd = ha_thd()->thread_id();
+    conn->get_cl(db_name, table_name, *collection);
+    if (0 != rc) {
+      delete collection;
+      collection = NULL;
+      SDB_LOG_ERROR("Collection[%s.%s] is not available. rc: %d", db_name,
+                    table_name, rc);
+      goto error;
+    }
   }
+
 done:
-  return;
+  return rc;
 error:
-  DBUG_ASSERT(FALSE);
   goto done;
 }
 
 int ha_sdb::start_statement(THD *thd, uint table_count) {
   int rc = 0;
+
+  rc = ensure_collection(thd);
+  if (0 != rc) {
+    goto error;
+  }
 
   if (0 == table_count) {
     if (thd_test_options(thd, OPTION_BEGIN)) {
@@ -1175,7 +1250,7 @@ error:
   return false;
 }
 
-int ha_sdb::create_index(Alter_inplace_info *ha_alter_info) {
+int ha_sdb::create_index(Sdb_cl &cl, Alter_inplace_info *ha_alter_info) {
   const KEY *keyInfo;
   int rc = 0;
 
@@ -1193,7 +1268,7 @@ error:
   goto done;
 }
 
-int ha_sdb::drop_index(Alter_inplace_info *ha_alter_info) {
+int ha_sdb::drop_index(Sdb_cl &cl, Alter_inplace_info *ha_alter_info) {
   int rc = 0;
 
   if (NULL == ha_alter_info->index_drop_buffer) {
@@ -1218,6 +1293,9 @@ bool ha_sdb::inplace_alter_table(TABLE *altered_table,
                                  Alter_inplace_info *ha_alter_info) {
   bool rs = false;
   int rc = 0;
+  THD *thd = current_thd;
+  Sdb_conn *conn = NULL;
+  Sdb_cl cl;
 
   Alter_inplace_info::HA_ALTER_FLAGS inplace_online_addidx =
       Alter_inplace_info::ADD_INDEX | Alter_inplace_info::ADD_UNIQUE_INDEX |
@@ -1229,8 +1307,21 @@ bool ha_sdb::inplace_alter_table(TABLE *altered_table,
       Alter_inplace_info::DROP_PK_INDEX |
       Alter_inplace_info::ALTER_COLUMN_NULLABLE;
 
+  conn = check_sdb_in_thd(thd, true);
+  if (NULL == conn) {
+    rc = HA_ERR_NO_CONNECTION;
+    goto error;
+  }
+
+  rc = conn->get_cl(db_name, table_name, cl);
+  if (0 != rc) {
+    SDB_LOG_ERROR("Collection[%s.%s] is not available. rc: %d", db_name,
+                  table_name, rc);
+    goto error;
+  }
+
   if (ha_alter_info->handler_flags & inplace_online_addidx) {
-    rc = create_index(ha_alter_info);
+    rc = create_index(cl, ha_alter_info);
     if (0 != rc) {
       SDB_PRINT_ERROR(ER_GET_ERRNO, ER(ER_GET_ERRNO), rc);
       rs = true;
@@ -1238,7 +1329,7 @@ bool ha_sdb::inplace_alter_table(TABLE *altered_table,
     }
   }
   if (ha_alter_info->handler_flags & inplace_online_dropidx) {
-    rc = drop_index(ha_alter_info);
+    rc = drop_index(cl, ha_alter_info);
     if (0 != rc) {
       SDB_PRINT_ERROR(ER_GET_ERRNO, ER(ER_GET_ERRNO), rc);
       rs = true;
@@ -1264,23 +1355,20 @@ error:
 }
 
 int ha_sdb::delete_all_rows() {
-  check_thread();
-  if (cl.is_transaction_on()) {
-    return cl.del();
+  DBUG_ASSERT(NULL != collection);
+  DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
+
+  if (collection->is_transaction_on()) {
+    return collection->del();
   }
   return truncate();
 }
 
 int ha_sdb::truncate() {
-  int rc = 0;
-  rc = cl.truncate();
-  if (rc != 0) {
-    goto error;
-  }
-done:
-  return rc;
-error:
-  goto done;
+  DBUG_ASSERT(NULL != collection);
+  DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
+
+  return collection->truncate();
 }
 
 ha_rows ha_sdb::records_in_range(uint inx, key_range *min_key,
@@ -1459,11 +1547,10 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
   sdbCollectionSpace cs;
   uint str_field_len = 0;
   Sdb_conn *conn = NULL;
+  Sdb_cl cl;
   bson::BSONObj options;
   bson::BSONObj comments;
   my_bool use_partition = sdb_use_partition;
-
-  fd = ha_thd()->thread_id();
 
   for (Field **field = form->field; *field; field++) {
     if ((*field)->key_length() > str_field_len &&

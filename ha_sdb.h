@@ -133,6 +133,8 @@ class ha_sdb : public handler {
   */
   int close(void);
 
+  int reset();
+
   /** @brief
     We implement this in ha_example.cc. It's not an obligatory method;
     skip it and and MySQL will treat it as not implemented.
@@ -238,7 +240,7 @@ class ha_sdb : public handler {
   const char *get_version();
 
  private:
-  void check_thread();
+  int ensure_collection(THD *thd);
 
   int obj_to_row(bson::BSONObj &obj, uchar *buf);
 
@@ -249,9 +251,9 @@ class ha_sdb : public handler {
 
   int cur_row(uchar *buf);
 
-  int create_index(Alter_inplace_info *ha_alter_info);
+  int create_index(Sdb_cl &cl, Alter_inplace_info *ha_alter_info);
 
-  int drop_index(Alter_inplace_info *ha_alter_info);
+  int drop_index(Sdb_cl &cl, Alter_inplace_info *ha_alter_info);
 
   int get_cl_options(TABLE *form, HA_CREATE_INFO *create_info,
                      bson::BSONObj &options, my_bool use_partition);
@@ -262,7 +264,7 @@ class ha_sdb : public handler {
 
  private:
   THR_LOCK_DATA lock_data;
-  Sdb_cl cl;
+  Sdb_cl *collection;
   bool first_read;
   bson::BSONObj cur_rec;
   bson::BSONObj condition;
@@ -271,7 +273,6 @@ class ha_sdb : public handler {
   Sdb_share *share;
   char db_name[SDB_CS_NAME_MAX_SIZE + 1];
   char table_name[SDB_CL_NAME_MAX_SIZE + 1];
-  int fd;
   time_t last_flush_time;
   int used_times;
   long long rec_num;

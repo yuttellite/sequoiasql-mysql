@@ -20,48 +20,32 @@
 
 using namespace sdbclient;
 
-Sdb_cl::Sdb_cl() : p_conn(NULL), m_thread_id(0) {}
+Sdb_cl::Sdb_cl() : m_conn(NULL), m_thread_id(0) {}
 
 Sdb_cl::~Sdb_cl() {
   close();
 }
 
-int Sdb_cl::init(Sdb_conn *connection, char *cs, char *cl) {
-  int rc = SDB_ERR_OK;
-  if (NULL == connection || NULL == cs || NULL == cl) {
-    rc = SDB_ERR_INVALID_ARG;
-    goto error;
-  }
-
-  p_conn = connection;
-  m_thread_id = connection->thread_id();
-
-  cs_name[SDB_CS_NAME_MAX_SIZE] = 0;
-  strncpy(cs_name, cs, SDB_CS_NAME_MAX_SIZE);
-
-  cl_name[SDB_CL_NAME_MAX_SIZE] = 0;
-  strncpy(cl_name, cl, SDB_CL_NAME_MAX_SIZE);
-
-  rc = re_init();
-
-done:
-  return rc;
-error:
-  goto done;
-}
-
-int Sdb_cl::re_init() {
+int Sdb_cl::init(Sdb_conn *connection, char *cs_name, char *cl_name) {
   int rc = SDB_ERR_OK;
   int retry_times = 2;
   sdbCollectionSpace cs;
 
+  if (NULL == connection || NULL == cs_name || NULL == cl_name) {
+    rc = SDB_ERR_INVALID_ARG;
+    goto error;
+  }
+
+  m_conn = connection;
+  m_thread_id = connection->thread_id();
+
 retry:
-  rc = p_conn->get_sdb().getCollectionSpace(cs_name, cs);
+  rc = m_conn->get_sdb().getCollectionSpace(cs_name, cs);
   if (rc != SDB_ERR_OK) {
     goto error;
   }
 
-  rc = cs.getCollection(cl_name, cl);
+  rc = cs.getCollection(cl_name, m_cl);
   if (rc != SDB_ERR_OK) {
     goto error;
   }
@@ -70,8 +54,8 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction_on();
-    if (!is_transaction && retry_times-- > 0 && 0 == p_conn->connect()) {
+    bool is_transaction = m_conn->is_transaction_on();
+    if (!is_transaction && retry_times-- > 0 && 0 == m_conn->connect()) {
       goto retry;
     }
   }
@@ -79,23 +63,16 @@ error:
   goto done;
 }
 
-int Sdb_cl::check_connect(int rc) {
-  if (SDB_NETWORK == rc || SDB_NOT_CONNECTED == rc) {
-    return p_conn->connect();
-  }
-  return SDB_ERR_OK;
-}
-
 bool Sdb_cl::is_transaction_on() {
-  return p_conn->is_transaction_on();
+  return m_conn->is_transaction_on();
 }
 
-char *Sdb_cl::get_cs_name() {
-  return cs_name;
+const char *Sdb_cl::get_cs_name() {
+  return m_cl.getCSName();
 }
 
-char *Sdb_cl::get_cl_name() {
-  return cl_name;
+const char *Sdb_cl::get_cl_name() {
+  return m_cl.getCollectionName();
 }
 
 int Sdb_cl::query(const bson::BSONObj &condition, const bson::BSONObj &selected,
@@ -104,8 +81,8 @@ int Sdb_cl::query(const bson::BSONObj &condition, const bson::BSONObj &selected,
   int rc = SDB_ERR_OK;
   int retry_times = 2;
 retry:
-  rc = cl.query(cursor, condition, selected, orderBy, hint, numToSkip,
-                numToReturn, flags);
+  rc = m_cl.query(m_cursor, condition, selected, orderBy, hint, numToSkip,
+                  numToReturn, flags);
   if (SDB_ERR_OK != rc) {
     goto error;
   }
@@ -114,8 +91,8 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction_on();
-    if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
+    bool is_transaction = m_conn->is_transaction_on();
+    if (0 == m_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
   }
@@ -131,8 +108,8 @@ int Sdb_cl::query_one(bson::BSONObj &obj, const bson::BSONObj &condition,
   sdbclient::sdbCursor cursor_tmp;
   int retry_times = 2;
 retry:
-  rc = cl.query(cursor_tmp, condition, selected, orderBy, hint, numToSkip, 1,
-                flags);
+  rc = m_cl.query(cursor_tmp, condition, selected, orderBy, hint, numToSkip, 1,
+                  flags);
   if (rc != SDB_ERR_OK) {
     goto error;
   }
@@ -146,8 +123,8 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction_on();
-    if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
+    bool is_transaction = m_conn->is_transaction_on();
+    if (0 == m_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
   }
@@ -157,7 +134,7 @@ error:
 
 int Sdb_cl::current(bson::BSONObj &obj) {
   int rc = SDB_ERR_OK;
-  rc = cursor.current(obj);
+  rc = m_cursor.current(obj);
   if (rc != SDB_ERR_OK) {
     if (SDB_DMS_EOC == rc) {
       rc = HA_ERR_END_OF_FILE;
@@ -174,7 +151,7 @@ error:
 
 int Sdb_cl::next(bson::BSONObj &obj) {
   int rc = SDB_ERR_OK;
-  rc = cursor.next(obj);
+  rc = m_cursor.next(obj);
   if (rc != SDB_ERR_OK) {
     if (SDB_DMS_EOC == rc) {
       rc = HA_ERR_END_OF_FILE;
@@ -193,7 +170,7 @@ int Sdb_cl::insert(bson::BSONObj &obj) {
   int rc = SDB_ERR_OK;
   int retry_times = 2;
 retry:
-  rc = cl.insert(obj);
+  rc = m_cl.insert(obj);
   if (rc != SDB_ERR_OK) {
     goto error;
   }
@@ -201,8 +178,8 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction_on();
-    if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
+    bool is_transaction = m_conn->is_transaction_on();
+    if (0 == m_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
   }
@@ -216,7 +193,7 @@ int Sdb_cl::upsert(const bson::BSONObj &rule, const bson::BSONObj &condition,
   int rc = SDB_ERR_OK;
   int retry_times = 2;
 retry:
-  rc = cl.upsert(rule, condition, hint, setOnInsert, flag);
+  rc = m_cl.upsert(rule, condition, hint, setOnInsert, flag);
   if (rc != SDB_ERR_OK) {
     goto error;
   }
@@ -224,8 +201,8 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction_on();
-    if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
+    bool is_transaction = m_conn->is_transaction_on();
+    if (0 == m_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
   }
@@ -238,7 +215,7 @@ int Sdb_cl::update(const bson::BSONObj &rule, const bson::BSONObj &condition,
   int rc = SDB_ERR_OK;
   int retry_times = 2;
 retry:
-  rc = cl.update(rule, condition, hint, flag);
+  rc = m_cl.update(rule, condition, hint, flag);
   if (rc != SDB_ERR_OK) {
     goto error;
   }
@@ -246,8 +223,8 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction_on();
-    if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
+    bool is_transaction = m_conn->is_transaction_on();
+    if (0 == m_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
   }
@@ -259,7 +236,7 @@ int Sdb_cl::del(const bson::BSONObj &condition, const bson::BSONObj &hint) {
   int rc = SDB_ERR_OK;
   int retry_times = 2;
 retry:
-  rc = cl.del(condition, hint);
+  rc = m_cl.del(condition, hint);
   if (rc != SDB_ERR_OK) {
     goto error;
   }
@@ -267,8 +244,8 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction_on();
-    if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
+    bool is_transaction = m_conn->is_transaction_on();
+    if (0 == m_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
   }
@@ -281,7 +258,7 @@ int Sdb_cl::create_index(const bson::BSONObj &indexDef, const CHAR *pName,
   int rc = SDB_ERR_OK;
   int retry_times = 2;
 retry:
-  rc = cl.createIndex(indexDef, pName, isUnique, isEnforced);
+  rc = m_cl.createIndex(indexDef, pName, isUnique, isEnforced);
   if (SDB_IXM_REDEF == rc) {
     rc = SDB_ERR_OK;
   }
@@ -292,8 +269,8 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction_on();
-    if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
+    bool is_transaction = m_conn->is_transaction_on();
+    if (0 == m_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
   }
@@ -305,7 +282,7 @@ int Sdb_cl::drop_index(const char *pName) {
   int rc = SDB_ERR_OK;
   int retry_times = 2;
 retry:
-  rc = cl.dropIndex(pName);
+  rc = m_cl.dropIndex(pName);
   if (SDB_IXM_NOTEXIST == rc) {
     rc = SDB_ERR_OK;
   }
@@ -316,8 +293,8 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction_on();
-    if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
+    bool is_transaction = m_conn->is_transaction_on();
+    if (0 == m_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
   }
@@ -329,7 +306,7 @@ int Sdb_cl::truncate() {
   int rc = SDB_ERR_OK;
   int retry_times = 2;
 retry:
-  rc = cl.truncate();
+  rc = m_cl.truncate();
   if (rc != SDB_ERR_OK) {
     goto error;
   }
@@ -337,8 +314,8 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction_on();
-    if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
+    bool is_transaction = m_conn->is_transaction_on();
+    if (0 == m_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
   }
@@ -347,7 +324,7 @@ error:
 }
 
 void Sdb_cl::close() {
-  cursor.close();
+  m_cursor.close();
 }
 
 my_thread_id Sdb_cl::thread_id() {
@@ -358,7 +335,7 @@ int Sdb_cl::drop() {
   int rc = SDB_ERR_OK;
   int retry_times = 2;
 retry:
-  rc = cl.drop();
+  rc = m_cl.drop();
   if (rc != SDB_ERR_OK) {
     if (SDB_DMS_NOTEXIST == rc) {
       rc = SDB_ERR_OK;
@@ -370,8 +347,8 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction_on();
-    if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
+    bool is_transaction = m_conn->is_transaction_on();
+    if (0 == m_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
   }
@@ -383,7 +360,7 @@ int Sdb_cl::get_count(long long &count) {
   int rc = SDB_ERR_OK;
   int retry_times = 2;
 retry:
-  rc = cl.getCount(count);
+  rc = m_cl.getCount(count);
   if (rc != SDB_ERR_OK) {
     goto error;
   }
@@ -391,8 +368,8 @@ done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    bool is_transaction = p_conn->is_transaction_on();
-    if (0 == p_conn->connect() && !is_transaction && retry_times-- > 0) {
+    bool is_transaction = m_conn->is_transaction_on();
+    if (0 == m_conn->connect() && !is_transaction && retry_times-- > 0) {
       goto retry;
     }
   }
