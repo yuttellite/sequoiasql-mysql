@@ -134,6 +134,8 @@ ha_sdb::ha_sdb(handlerton *hton, TABLE_SHARE *table_arg)
   collection = NULL;
   first_read = TRUE;
   used_times = 0;
+  last_flush_time = time(NULL);
+  stats.records = 2;
   memset(db_name, 0, SDB_CS_NAME_MAX_SIZE + 1);
   memset(table_name, 0, SDB_CL_NAME_MAX_SIZE + 1);
   init_alloc_root(sdb_key_memory_blobroot, &blobroot, 8 * 1024, 0);
@@ -450,7 +452,6 @@ int ha_sdb::write_row(uchar *buf) {
     goto error;
   }
 
-  stats.records++;
 done:
   return rc;
 error:
@@ -523,7 +524,7 @@ int ha_sdb::index_next(uchar *buf) {
   if (rc != 0) {
     goto error;
   }
-  stats.records++;
+
 done:
   return rc;
 error:
@@ -541,7 +542,7 @@ int ha_sdb::index_prev(uchar *buf) {
   if (rc != 0) {
     goto error;
   }
-  stats.records++;
+
 done:
   return rc;
 error:
@@ -705,7 +706,6 @@ double ha_sdb::read_time(uint index, uint ranges, ha_rows rows) {
 }
 
 int ha_sdb::rnd_init(bool scan) {
-  stats.records = 0;
   first_read = TRUE;
   if (!pushed_cond) {
     condition = empty_obj;
@@ -938,7 +938,6 @@ int ha_sdb::rnd_next(uchar *buf) {
   if (rc != 0) {
     goto error;
   }
-  stats.records++;
 
 done:
   return rc;
@@ -989,6 +988,7 @@ void ha_sdb::position(const uchar *record) {
 
 int ha_sdb::info(uint flag) {
   int rc = 0;
+  long long rec_num = 2;
 
   rc = ensure_collection(ha_thd());
   if (0 != rc) {
@@ -1034,6 +1034,12 @@ int ha_sdb::info(uint flag) {
   stats.block_size = 0;
   stats.mrr_length_per_rec = 0;
   stats.table_in_mem_estimate = -1;
+
+  // optimizer interprets the values 0 and 1 as EXACT
+  // < 2 should not be returned.
+  if (stats.records < 2) {
+    stats.records = 2;
+  }
 
 done:
   return rc;
