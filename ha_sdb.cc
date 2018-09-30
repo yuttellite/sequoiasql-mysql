@@ -132,9 +132,10 @@ ha_sdb::ha_sdb(handlerton *hton, TABLE_SHARE *table_arg)
   keynr = -1;
   share = NULL;
   collection = NULL;
-  first_read = TRUE;
+  first_read = true;
   used_times = 0;
   last_flush_time = time(NULL);
+  m_use_bulk_insert = false;
   stats.records = 2;
   memset(db_name, 0, SDB_CS_NAME_MAX_SIZE + 1);
   memset(table_name, 0, SDB_CL_NAME_MAX_SIZE + 1);
@@ -142,6 +143,7 @@ ha_sdb::ha_sdb(handlerton *hton, TABLE_SHARE *table_arg)
 }
 
 ha_sdb::~ha_sdb() {
+  m_bulk_insert_rows.clear();
   free_root(&blobroot, MYF(0));
   DBUG_ASSERT(NULL == collection);
 }
@@ -428,9 +430,59 @@ error:
   goto done;
 }
 
+void ha_sdb::start_bulk_insert(ha_rows rows) {
+  if (!sdb_use_bulk_insert) {
+    m_use_bulk_insert = false;
+    return;
+  }
+
+  m_bulk_insert_rows.clear();
+
+  /**
+    We don't bother with bulk-insert semantics when the estimated rows == 1
+    The rows value will be 0 if the server does not know how many rows
+    would be inserted. This can occur when performing INSERT...SELECT
+  */
+  if (rows == 1) {
+    m_use_bulk_insert = false;
+    return;
+  }
+
+  m_use_bulk_insert = true;
+}
+
+int ha_sdb::flush_bulk_insert(bool ignore_dup_key) {
+  DBUG_ASSERT(m_bulk_insert_rows.size() > 0);
+  DBUG_ASSERT(NULL != collection);
+  DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
+
+  int flag = ignore_dup_key ? FLG_INSERT_CONTONDUP : 0;
+
+  int rc = collection->bulk_insert(flag, m_bulk_insert_rows);
+  m_bulk_insert_rows.clear();
+  return rc;
+}
+
+int ha_sdb::end_bulk_insert() {
+  int rc = 0;
+
+  if (m_use_bulk_insert) {
+    m_use_bulk_insert = false;
+    if (m_bulk_insert_rows.size() > 0) {
+      bool ignore_dup_key = ha_thd()->lex && ha_thd()->lex->is_ignore();
+      rc = flush_bulk_insert(ignore_dup_key);
+    }
+  }
+
+  return rc;
+}
+
 int ha_sdb::write_row(uchar *buf) {
   int rc = 0;
-  bson::BSONObj obj, tmp_obj;
+  bson::BSONObj obj;
+  bson::BSONObj tmp_obj;
+  bool ignore_dup_key = ha_thd()->lex && ha_thd()->lex->is_ignore();
+
   ha_statistic_increment(&SSV::ha_write_count);
 
   DBUG_ASSERT(NULL != collection);
@@ -441,15 +493,24 @@ int ha_sdb::write_row(uchar *buf) {
     goto error;
   }
 
-  rc = collection->insert(obj);
+  if (m_use_bulk_insert) {
+    m_bulk_insert_rows.push_back(obj);
+    if ((int)m_bulk_insert_rows.size() > sdb_bulk_insert_size) {
+      rc = flush_bulk_insert(ignore_dup_key);
+      if (rc != 0) {
+        goto error;
+      }
+    }
+  } else {
+    rc = collection->insert(obj);
 
-  // ignore duplicate key
-  if (SDB_IXM_DUP_KEY == get_sdb_code(rc) && ha_thd()->lex &&
-      ha_thd()->lex->is_ignore()) {
-    rc = HA_ERR_FOUND_DUPP_KEY;
-  }
-  if (rc != 0) {
-    goto error;
+    // ignore duplicate key
+    if (SDB_IXM_DUP_KEY == get_sdb_code(rc) && ignore_dup_key) {
+      rc = HA_ERR_FOUND_DUPP_KEY;
+    }
+    if (rc != 0) {
+      goto error;
+    }
   }
 
 done:
@@ -706,7 +767,7 @@ double ha_sdb::read_time(uint index, uint ranges, ha_rows rows) {
 }
 
 int ha_sdb::rnd_init(bool scan) {
-  first_read = TRUE;
+  first_read = true;
   if (!pushed_cond) {
     condition = empty_obj;
   }
@@ -929,7 +990,7 @@ int ha_sdb::rnd_next(uchar *buf) {
     if (rc != 0) {
       goto error;
     }
-    first_read = FALSE;
+    first_read = false;
   }
 
   ha_statistic_increment(&SSV::ha_read_rnd_next_count);

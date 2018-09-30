@@ -46,6 +46,8 @@ class Sdb_conn_addrs {
 
 extern char *sdb_conn_str;
 extern my_bool sdb_use_partition;
+extern my_bool sdb_use_bulk_insert;
+extern int sdb_bulk_insert_size;
 extern my_bool sdb_debug_log;
 extern st_mysql_sys_var *sdb_sys_vars[];
 

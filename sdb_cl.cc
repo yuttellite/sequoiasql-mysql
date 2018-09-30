@@ -179,10 +179,25 @@ done:
 error:
   if (IS_SDB_NET_ERR(rc)) {
     bool is_transaction = m_conn->is_transaction_on();
-    if (0 == m_conn->connect() && !is_transaction && retry_times-- > 0) {
+    if (!is_transaction && retry_times-- > 0 && 0 == m_conn->connect()) {
       goto retry;
     }
   }
+  convert_sdb_code(rc);
+  goto done;
+}
+
+int Sdb_cl::bulk_insert(INT32 flag, std::vector<bson::BSONObj> &objs) {
+  int rc = SDB_ERR_OK;
+
+  rc = m_cl.bulkInsert(flag, objs);
+  if (rc != SDB_ERR_OK) {
+    goto error;
+  }
+
+done:
+  return rc;
+error:
   convert_sdb_code(rc);
   goto done;
 }

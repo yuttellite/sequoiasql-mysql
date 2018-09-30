@@ -17,6 +17,7 @@
 #define SDB_CL__H
 
 #include <mysql/psi/mysql_thread.h>
+#include <vector>
 #include "client.hpp"
 #include "sdb_def.h"
 #include "sdb_conn.h"
@@ -54,6 +55,8 @@ class Sdb_cl {
   int next(bson::BSONObj &obj);
 
   int insert(bson::BSONObj &obj);
+
+  int bulk_insert(INT32 flag, std::vector<bson::BSONObj> &objs);
 
   int update(const bson::BSONObj &rule,
              const bson::BSONObj &condition = sdbclient::_sdbStaticObject,

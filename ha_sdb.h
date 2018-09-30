@@ -13,8 +13,9 @@
   along with this program; if not, write to the Free Software
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
-#include "handler.h"
-#include "client.hpp"
+#include <handler.h>
+#include <client.hpp>
+#include <vector>
 #include "sdb_def.h"
 #include "sdb_cl.h"
 
@@ -135,6 +136,28 @@ class ha_sdb : public handler {
 
   int reset();
 
+  /**
+    @brief Prepares the storage engine for bulk inserts.
+
+    @param[in] rows       estimated number of rows in bulk insert
+                          or 0 if unknown.
+
+    @details Initializes memory structures required for bulk insert.
+  */
+  void start_bulk_insert(ha_rows rows);
+
+  /**
+    @brief End bulk insert.
+
+    @details This method will send any remaining rows to the remote server.
+    Finally, it will deinitialize the bulk insert data structure.
+
+    @return Operation status
+    @retval       0       No error
+    @retval       != 0    Error occured at remote server. Also sets my_errno.
+  */
+  int end_bulk_insert();
+
   /** @brief
     We implement this in ha_example.cc. It's not an obligatory method;
     skip it and and MySQL will treat it as not implemented.
@@ -251,6 +274,8 @@ class ha_sdb : public handler {
 
   int cur_row(uchar *buf);
 
+  int flush_bulk_insert(bool ignore_dup_key);
+
   int create_index(Sdb_cl &cl, Alter_inplace_info *ha_alter_info);
 
   int drop_index(Sdb_cl &cl, Alter_inplace_info *ha_alter_info);
@@ -277,4 +302,6 @@ class ha_sdb : public handler {
   int used_times;
   MEM_ROOT blobroot;
   int idx_order_direction;
+  bool m_use_bulk_insert;
+  std::vector<bson::BSONObj> m_bulk_insert_rows;
 };
