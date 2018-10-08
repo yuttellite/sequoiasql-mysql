@@ -48,7 +48,7 @@ using namespace sdbclient;
 #endif
 #define SDB_VER_INFO (SDB_VER_INFO_F1() SDB_VER_INFO_F2())
 
-#define SDB_ID_STR_LEN 24
+#define SDB_OID_LEN 12
 #define SDB_FIELD_MAX_LEN (16 * 1024 * 1024)
 const static char sdb_ver_info[] = SDB_VER_INFO;
 
@@ -192,7 +192,7 @@ uint ha_sdb::max_supported_key_length() const {
 
 int ha_sdb::open(const char *name, int mode, uint test_if_locked) {
   int rc = 0;
-  ref_length = SDB_ID_STR_LEN + 1;  // length of _id
+  ref_length = SDB_OID_LEN;  // length of _id
   Sdb_conn *connection = NULL;
   Sdb_cl cl;
 
@@ -1009,12 +1009,14 @@ error:
 int ha_sdb::rnd_pos(uchar *buf, uchar *pos) {
   int rc = 0;
   bson::BSONObjBuilder objBuilder;
-  bson::OID tmpOid((const char *)pos);
-  objBuilder.appendOID("_id", &tmpOid);
-  bson::BSONObj oidObj = objBuilder.obj();
+  bson::OID oid;
 
   DBUG_ASSERT(NULL != collection);
   DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
+
+  memcpy((void *)oid.getData(), pos, SDB_OID_LEN);
+  objBuilder.appendOID("_id", &oid);
+  bson::BSONObj oidObj = objBuilder.obj();
 
   rc = collection->query_one(cur_rec, oidObj);
   if (rc) {
@@ -1036,10 +1038,8 @@ error:
 void ha_sdb::position(const uchar *record) {
   bson::BSONElement beField;
   if (cur_rec.getObjectID(beField)) {
-    bson::OID tmpOid;
-    tmpOid = beField.__oid();
-    memcpy(ref, tmpOid.str().c_str(), SDB_ID_STR_LEN);
-    ref[SDB_ID_STR_LEN] = 0;
+    bson::OID oid = beField.__oid();
+    memcpy(ref, oid.getData(), SDB_OID_LEN);
     if (beField.type() != bson::jstOID) {
       SDB_LOG_ERROR("Unexpected _id's type: %d ", beField.type());
     }
