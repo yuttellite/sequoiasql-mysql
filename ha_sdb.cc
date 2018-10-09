@@ -129,7 +129,7 @@ static int free_sdb_share(Sdb_share *share) {
 
 ha_sdb::ha_sdb(handlerton *hton, TABLE_SHARE *table_arg)
     : handler(hton, table_arg) {
-  keynr = -1;
+  active_index = MAX_KEY;
   share = NULL;
   collection = NULL;
   first_read = true;
@@ -644,8 +644,8 @@ int ha_sdb::index_read_map(uchar *buf, const uchar *key_ptr,
   bson::BSONObjBuilder cond_builder;
   int order_direction = 1;
 
-  if (NULL != key_ptr && keynr >= 0) {
-    rc = build_match_obj_by_start_stop_key((uint)keynr, key_ptr, keypart_map,
+  if (NULL != key_ptr && active_index < MAX_KEY) {
+    rc = build_match_obj_by_start_stop_key(active_index, key_ptr, keypart_map,
                                            find_flag, end_range, table,
                                            condition_idx, &order_direction);
     if (rc) {
@@ -684,7 +684,7 @@ int ha_sdb::index_read_one(bson::BSONObj condition, int order_direction,
   DBUG_ASSERT(NULL != collection);
   DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
 
-  idx_key = table->key_info + keynr;
+  idx_key = table->key_info + active_index;
   idx_name = sdb_get_idx_name(idx_key);
   if (idx_name) {
     hint = BSON("" << idx_name);
@@ -739,7 +739,6 @@ error:
 }
 
 int ha_sdb::index_init(uint idx, bool sorted) {
-  keynr = (int)idx;
   active_index = idx;
   if (!pushed_cond) {
     condition = empty_obj;
@@ -752,7 +751,7 @@ int ha_sdb::index_end() {
   DBUG_ASSERT(NULL != collection);
   DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
   collection->close();
-  keynr = -1;
+  active_index = MAX_KEY;
   return 0;
 }
 

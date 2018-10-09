@@ -293,7 +293,6 @@ class ha_sdb : public handler {
   bool first_read;
   bson::BSONObj cur_rec;
   bson::BSONObj condition;
-  int keynr;        // use for index_scan
   String conv_str;  // use for converting charset
   Sdb_share *share;
   char db_name[SDB_CS_NAME_MAX_SIZE + 1];
