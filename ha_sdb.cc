@@ -36,21 +36,36 @@
 
 using namespace sdbclient;
 
-#ifndef SDB_VER
-#define SDB_VER "UNKNOWN"
+#ifndef SDB_DRIVER_VERSION
+#define SDB_DRIVER_VERSION "UNKNOWN"
 #endif
-#define SDB_VER_INFO_NAME "SequoiadbPluginVersion: "
-#define SDB_VER_INFO_F1() SDB_VER_INFO_NAME
+
+#ifndef SDB_PLUGIN_VERSION
+#define SDB_PLUGIN_VERSION "UNKNOWN"
+#endif
+
 #ifdef DEBUG
-#define SDB_VER_INFO_F2() SDB_VER " Debug"
-#else
-#define SDB_VER_INFO_F2() SDB_VER " Release"
-#endif
-#define SDB_VER_INFO (SDB_VER_INFO_F1() SDB_VER_INFO_F2())
+#ifdef SDB_ENTERPRISE
+#define SDB_ENGINE_EDITION "Enterprise-Debug"
+#else /* SDB_ENTERPRISE */
+#define SDB_ENGINE_EDITION "Community-Debug"
+#endif /* SDB_ENTERPRISE */
+#else  /* DEBUG */
+#ifdef SDB_ENTERPRISE
+#define SDB_ENGINE_EDITION "Enterprise"
+#else /* SDB_ENTERPRISE */
+#define SDB_ENGINE_EDITION "Community"
+#endif /* SDB_ENTERPRISE */
+#endif /* DEBUG */
+
+#define SDB_ENGINE_INFO "SequoiaDB storage engine(" SDB_ENGINE_EDITION ")"
+#define SDB_VERSION_INFO \
+  "Plugin: " SDB_PLUGIN_VERSION ", Driver: " SDB_DRIVER_VERSION
 
 #define SDB_OID_LEN 12
 #define SDB_FIELD_MAX_LEN (16 * 1024 * 1024)
-const static char sdb_ver_info[] = SDB_VER_INFO;
+
+const static char *sdb_plugin_info = SDB_ENGINE_INFO ". " SDB_VERSION_INFO ".";
 
 handlerton *sdb_hton = NULL;
 
@@ -1775,10 +1790,6 @@ Item *ha_sdb::idx_cond_push(uint keyno, Item *idx_cond) {
   return idx_cond;
 }
 
-const char *ha_sdb::get_version() {
-  return sdb_ver_info;
-}
-
 static handler *sdb_create_handler(handlerton *hton, TABLE_SHARE *table,
                                    MEM_ROOT *mem_root) {
   return new (mem_root) ha_sdb(hton, table);
@@ -1962,43 +1973,18 @@ static int sdb_done_func(void *p) {
 static struct st_mysql_storage_engine sdb_storage_engine = {
     MYSQL_HANDLERTON_INTERFACE_VERSION};
 
-static char *get_sdb_plugin_info() {
-#ifdef SDB_ENTERPRISE
-#define SDB_ENG_INFO "SequoiaDB storage engine(Enterprise). "
-#else
-#define SDB_ENG_INFO "SequoiaDB storage engine(Community). "
-#endif
-  static char sdb_plugin_info[256] = SDB_ENG_INFO;
-  char *pPos = &sdb_plugin_info[strlen(SDB_ENG_INFO)];
-  const char *pVersion = &sdb_ver_info[strlen(SDB_VER_INFO_NAME)];
-  const char *pTmp = strchr(pVersion, '_');
-  if (pTmp != NULL) {
-#define SDB_COMMENT "Sequoiadb:"
-#define SDB_PLUGIN_COMMENT ", Plugin:"
-    strncpy(pPos, SDB_COMMENT, strlen(SDB_COMMENT));
-    pPos += strlen(SDB_COMMENT);
-    strncpy(pPos, pVersion, pTmp - pVersion);
-    pPos += pTmp - pVersion;
-    strncpy(pPos, SDB_PLUGIN_COMMENT, strlen(SDB_PLUGIN_COMMENT));
-    pPos += strlen(SDB_PLUGIN_COMMENT);
-    strncpy(pPos, pTmp + 1, strlen(pTmp + 1));
-    pPos[strlen(pTmp + 1)] = 0;
-  }
-  return sdb_plugin_info;
-}
-
 mysql_declare_plugin(sequoiadb){
     MYSQL_STORAGE_ENGINE_PLUGIN,
     &sdb_storage_engine,
     "SequoiaDB",
     "SequoiaDB Inc.",
-    get_sdb_plugin_info(),
+    sdb_plugin_info,
     PLUGIN_LICENSE_GPL,
     sdb_init_func, /* Plugin Init */
     sdb_done_func, /* Plugin Deinit */
-    0x0100 /* 1.0 */,
-    NULL,         /* status variables                */
-    sdb_sys_vars, /* system variables                */
-    NULL,         /* config options                  */
-    0,            /* flags                           */
+    0x0300,        /* version */
+    NULL,          /* status variables */
+    sdb_sys_vars,  /* system variables */
+    NULL,          /* config options */
+    0,             /* flags */
 } mysql_declare_plugin_end;
