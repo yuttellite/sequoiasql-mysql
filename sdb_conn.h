@@ -51,10 +51,6 @@ class Sdb_conn {
 
   int drop_cl(char *cs_name, char *cl_name);
 
-  int create_global_domain(const char *domain_name);
-
-  int create_global_domain_cs(const char *domain_name, char *cs_name);
-
   inline bool is_valid() { return m_connection.isValid(); }
 
  private:

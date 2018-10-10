@@ -1676,14 +1676,6 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
   }
   DBUG_ASSERT(conn->thread_id() == ha_thd()->thread_id());
 
-  // TODO: get sdb_auto_split from configure
-  if (use_partition) {
-    rc = conn->create_global_domain_cs(SDB_GLOBAL_DOMAIN_NAME, db_name);
-  }
-  if (rc != 0) {
-    goto error;
-  }
-
   rc = conn->create_cl(db_name, table_name, options);
   if (0 != rc) {
     goto error;
