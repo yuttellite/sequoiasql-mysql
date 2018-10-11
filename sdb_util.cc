@@ -13,43 +13,53 @@
   along with this program; if not, write to the Free Software
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
-#include "sql_class.h"
-#include "sql_table.h"
 #include "sdb_util.h"
+#include <sql_table.h>
+#include <string.h>
 #include "sdb_log.h"
 #include "sdb_errcode.h"
-#include "mysqld.h"
-#include <string.h>
+#include "sdb_def.h"
 
-int sdb_parse_table_name(const char *from, char *db_name, int db_name_size,
-                         char *table_name, int table_name_size) {
-  int rc = 0, len = 0;
-  const char *pBegin, *pEnd;
-  pBegin = from + 2;  // skip "./"
-  pEnd = strchr(pBegin, '/');
-  if (NULL == pEnd) {
-    rc = -1;
-    goto error;
-  }
-  len = pEnd - pBegin;
-  if (len >= db_name_size) {
-    rc = -1;
-    goto error;
-  }
-  memcpy(db_name, pBegin, len);
-  db_name[len] = 0;
-  my_casedn_str(system_charset_info, db_name);
+int sdb_parse_table_name(const char *from, char *db_name, int db_name_max_size,
+                         char *table_name, int table_name_max_size) {
+  int rc = 0;
+  int name_len = 0;
+  char *end = NULL;
+  char *ptr = NULL;
+  char *tmp_name = NULL;
+  char tmp_buff[SDB_CL_NAME_MAX_SIZE + SDB_CS_NAME_MAX_SIZE + 1];
 
-  pBegin = pEnd + 1;
-  pEnd = strchrnul(pBegin, '/');
-  len = pEnd - pBegin;
-  if (*pEnd != 0 || len >= table_name_size) {
-    rc = -1;
+  tmp_name = tmp_buff;
+
+  // scan table_name from the end
+  end = strend(from) - 1;
+  ptr = end;
+  while (ptr >= from && *ptr != '\\' && *ptr != '/') {
+    ptr--;
+  }
+  name_len = (int)(end - ptr);
+  if (name_len > table_name_max_size) {
+    rc = ER_TOO_LONG_IDENT;
     goto error;
   }
-  memcpy(table_name, pBegin, len);
-  table_name[len] = 0;
-  my_casedn_str(system_charset_info, table_name);
+  memcpy(tmp_name, ptr + 1, end - ptr);
+  tmp_name[name_len] = '\0';
+  filename_to_tablename(tmp_name, table_name, sizeof(tmp_buff) - 1);
+
+  // scan db_name
+  ptr--;
+  end = ptr;
+  while (ptr >= from && *ptr != '\\' && *ptr != '/') {
+    ptr--;
+  }
+  name_len = (int)(end - ptr);
+  if (name_len > db_name_max_size) {
+    rc = ER_TOO_LONG_IDENT;
+    goto error;
+  }
+  memcpy(tmp_name, ptr + 1, end - ptr);
+  tmp_name[name_len] = '\0';
+  filename_to_tablename(tmp_name, db_name, sizeof(tmp_buff) - 1);
 
 done:
   return rc;
@@ -58,29 +68,35 @@ error:
 }
 
 int sdb_get_db_name_from_path(const char *path, char *db_name,
-                              int db_name_size) {
-  int rc = SDB_ERR_OK, len = 0;
-  const char *pBegin = NULL, *pEnd = NULL;
-  if (NULL == path) {
-    rc = SDB_ERR_INVALID_ARG;
-    goto error;
-  }
+                              int db_name_max_size) {
+  int rc = 0;
+  int name_len = 0;
+  char *end = NULL;
+  char *ptr = NULL;
+  char *tmp_name = NULL;
+  char tmp_buff[SDB_CS_NAME_MAX_SIZE + 1];
 
-  pBegin = path + 2;  // skip "./"
-  pEnd = strrchr(pBegin, '/');
-  if (pEnd <= pBegin) {
-    rc = SDB_ERR_INVALID_ARG;
-    goto error;
-  }
+  tmp_name = tmp_buff;
 
-  len = pEnd - pBegin;
-  if (len >= db_name_size) {
-    rc = SDB_ERR_INVALID_ARG;
+  // scan from the end
+  end = strend(path) - 1;
+  ptr = end;
+  while (ptr >= path && *ptr != '\\' && *ptr != '/') {
+    ptr--;
+  }
+  ptr--;
+  end = ptr;
+  while (ptr >= path && *ptr != '\\' && *ptr != '/') {
+    ptr--;
+  }
+  name_len = (int)(end - ptr);
+  if (name_len > db_name_max_size) {
+    rc = ER_TOO_LONG_IDENT;
     goto error;
   }
-  memcpy(db_name, pBegin, len);
-  db_name[len] = 0;
-  my_casedn_str(system_charset_info, db_name);
+  memcpy(tmp_name, ptr + 1, end - ptr);
+  tmp_name[name_len] = '\0';
+  filename_to_tablename(tmp_name, db_name, sizeof(tmp_buff) - 1);
 
 done:
   return rc;

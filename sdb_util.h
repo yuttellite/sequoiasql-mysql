@@ -16,16 +16,14 @@
 #ifndef SDB_UTIL__H
 #define SDB_UTIL__H
 
-#include <time.h>
 #include <sql_class.h>
-#include <mysql/psi/mysql_file.h>
 #include <thr_mutex.h>
 
-int sdb_parse_table_name(const char *from, char *db_name, int db_name_size,
-                         char *table_name, int table_name_size);
+int sdb_parse_table_name(const char *from, char *db_name, int db_name_max_size,
+                         char *table_name, int table_name_max_size);
 
 int sdb_get_db_name_from_path(const char *path, char *db_name,
-                              int db_name_size);
+                              int db_name_max_size);
 
 int sdb_convert_charset(const String &src_str, String &dst_str,
                         const CHARSET_INFO *dst_charset);

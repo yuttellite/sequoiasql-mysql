@@ -216,8 +216,8 @@ int ha_sdb::open(const char *name, int mode, uint test_if_locked) {
     goto error;
   }
 
-  rc = sdb_parse_table_name(name, db_name, SDB_CS_NAME_MAX_SIZE + 1, table_name,
-                            SDB_CL_NAME_MAX_SIZE + 1);
+  rc = sdb_parse_table_name(name, db_name, SDB_CS_NAME_MAX_SIZE, table_name,
+                            SDB_CL_NAME_MAX_SIZE);
   if (rc != 0) {
     SDB_LOG_ERROR("Table name[%s] can't be parsed. rc: %d", name, rc);
     goto error;
@@ -1462,8 +1462,8 @@ int ha_sdb::delete_table(const char *from) {
   int rc = 0;
   Sdb_conn *conn = NULL;
 
-  rc = sdb_parse_table_name(from, db_name, SDB_CS_NAME_MAX_SIZE + 1, table_name,
-                            SDB_CL_NAME_MAX_SIZE + 1);
+  rc = sdb_parse_table_name(from, db_name, SDB_CS_NAME_MAX_SIZE, table_name,
+                            SDB_CL_NAME_MAX_SIZE);
   if (rc != 0) {
     goto error;
   }
@@ -1495,14 +1495,14 @@ int ha_sdb::rename_table(const char *from, const char *to) {
   char new_db_name[SDB_CS_NAME_MAX_SIZE + 1] = {0};
   char new_table_name[SDB_CL_NAME_MAX_SIZE + 1] = {0};
 
-  rc = sdb_parse_table_name(from, old_db_name, SDB_CS_NAME_MAX_SIZE + 1,
-                            old_table_name, SDB_CL_NAME_MAX_SIZE + 1);
+  rc = sdb_parse_table_name(from, old_db_name, SDB_CS_NAME_MAX_SIZE,
+                            old_table_name, SDB_CL_NAME_MAX_SIZE);
   if (0 != rc) {
     goto error;
   }
 
-  rc = sdb_parse_table_name(to, new_db_name, SDB_CS_NAME_MAX_SIZE + 1,
-                            new_table_name, SDB_CL_NAME_MAX_SIZE + 1);
+  rc = sdb_parse_table_name(to, new_db_name, SDB_CS_NAME_MAX_SIZE,
+                            new_table_name, SDB_CL_NAME_MAX_SIZE);
   if (0 != rc) {
     goto error;
   }
@@ -1680,8 +1680,8 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
     }
   }
 
-  rc = sdb_parse_table_name(name, db_name, SDB_CS_NAME_MAX_SIZE + 1, table_name,
-                            SDB_CL_NAME_MAX_SIZE + 1);
+  rc = sdb_parse_table_name(name, db_name, SDB_CS_NAME_MAX_SIZE, table_name,
+                            SDB_CL_NAME_MAX_SIZE);
   if (0 != rc) {
     goto error;
   }
@@ -1926,7 +1926,7 @@ static void sdb_drop_database(handlerton *hton, char *path) {
   }
   DBUG_ASSERT(connection->thread_id() == thd->thread_id());
 
-  rc = sdb_get_db_name_from_path(path, db_name, SDB_CS_NAME_MAX_SIZE + 1);
+  rc = sdb_get_db_name_from_path(path, db_name, SDB_CS_NAME_MAX_SIZE);
   if (rc != 0) {
     goto error;
   }
