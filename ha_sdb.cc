@@ -1487,22 +1487,44 @@ error:
 }
 
 int ha_sdb::rename_table(const char *from, const char *to) {
-  THD *thd = current_thd;
+  Sdb_conn *conn = NULL;
   int rc = 0;
-  switch (thd_sql_command(thd)) {
-    /*case SQLCOM_CREATE_INDEX:
-       //TODO:***********
-       break ;
-    case SQLCOM_DROP_INDEX:
-       //TODO:************
-       break ;
-    case SQLCOM_ALTER_TABLE:
-       //TODO:************
-       break ;*/
-    default:
-      rc = -1;
-      goto error;
+
+  char old_db_name[SDB_CS_NAME_MAX_SIZE + 1] = {0};
+  char old_table_name[SDB_CL_NAME_MAX_SIZE + 1] = {0};
+  char new_db_name[SDB_CS_NAME_MAX_SIZE + 1] = {0};
+  char new_table_name[SDB_CL_NAME_MAX_SIZE + 1] = {0};
+
+  rc = sdb_parse_table_name(from, old_db_name, SDB_CS_NAME_MAX_SIZE + 1,
+                            old_table_name, SDB_CL_NAME_MAX_SIZE + 1);
+  if (0 != rc) {
+    goto error;
   }
+
+  rc = sdb_parse_table_name(to, new_db_name, SDB_CS_NAME_MAX_SIZE + 1,
+                            new_table_name, SDB_CL_NAME_MAX_SIZE + 1);
+  if (0 != rc) {
+    goto error;
+  }
+
+  if (strcmp(old_db_name, new_db_name) != 0) {
+    rc = HA_ERR_NOT_ALLOWED_COMMAND;
+    SDB_PRINT_ERROR(rc, "Can't change database name when rename table.");
+    goto error;
+  }
+
+  conn = check_sdb_in_thd(ha_thd(), true);
+  if (NULL == conn) {
+    rc = HA_ERR_NO_CONNECTION;
+    goto error;
+  }
+  DBUG_ASSERT(conn->thread_id() == ha_thd()->thread_id());
+
+  rc = conn->rename_cl(old_db_name, old_table_name, new_table_name);
+  if (0 != rc) {
+    goto error;
+  }
+
 done:
   return rc;
 error:

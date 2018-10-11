@@ -172,17 +172,30 @@ error:
   goto done;
 }
 
-int Sdb_conn::drop_cs(char *cs_name) {
+int Sdb_conn::rename_cl(char *cs_name, char *old_cl_name, char *new_cl_name) {
   int rc = SDB_ERR_OK;
-  rc = m_connection.dropCollectionSpace(cs_name);
+  int retry_times = 2;
+  sdbclient::sdbCollectionSpace cs;
+  sdbclient::sdbCollection cl;
+
+retry:
+  rc = m_connection.getCollectionSpace(cs_name, cs);
   if (rc != SDB_ERR_OK) {
     goto error;
   }
+
+  rc = cs.renameCollection(old_cl_name, new_cl_name);
+  if (rc != SDB_ERR_OK) {
+    goto error;
+  }
+
 done:
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
-    connect();
+    if (!m_transaction_on && retry_times-- > 0 && 0 == connect()) {
+      goto retry;
+    }
   }
   convert_sdb_code(rc);
   goto done;
@@ -214,6 +227,24 @@ retry:
     goto error;
   }
 
+done:
+  return rc;
+error:
+  if (IS_SDB_NET_ERR(rc)) {
+    if (!m_transaction_on && retry_times-- > 0 && 0 == connect()) {
+      goto retry;
+    }
+  }
+  convert_sdb_code(rc);
+  goto done;
+}
+
+int Sdb_conn::drop_cs(char *cs_name) {
+  int rc = SDB_ERR_OK;
+  rc = m_connection.dropCollectionSpace(cs_name);
+  if (rc != SDB_ERR_OK) {
+    goto error;
+  }
 done:
   return rc;
 error:

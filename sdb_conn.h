@@ -47,9 +47,11 @@ class Sdb_conn {
   int create_cl(char *cs_name, char *cl_name,
                 const bson::BSONObj &options = sdbclient::_sdbStaticObject);
 
-  int drop_cs(char *cs_name);
+  int rename_cl(char *cs_name, char *old_cl_name, char *new_cl_name);
 
   int drop_cl(char *cs_name, char *cl_name);
+
+  int drop_cs(char *cs_name);
 
   inline bool is_valid() { return m_connection.isValid(); }
 
