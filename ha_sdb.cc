@@ -1388,6 +1388,19 @@ bool ha_sdb::inplace_alter_table(TABLE *altered_table,
       Alter_inplace_info::DROP_PK_INDEX |
       Alter_inplace_info::ALTER_COLUMN_NULLABLE;
 
+  if (ha_alter_info->handler_flags &
+      ~(inplace_online_addidx | inplace_online_dropidx |
+        Alter_inplace_info::ADD_COLUMN | Alter_inplace_info::DROP_COLUMN |
+        Alter_inplace_info::ALTER_STORED_COLUMN_ORDER |
+        Alter_inplace_info::ALTER_STORED_COLUMN_TYPE |
+        Alter_inplace_info::ALTER_COLUMN_DEFAULT |
+        Alter_inplace_info::ALTER_COLUMN_EQUAL_PACK_LENGTH)) {
+    SDB_PRINT_ERROR(HA_ERR_UNSUPPORTED,
+                    "Storage engine doesn't support the operation.");
+    rs = true;
+    goto error;
+  }
+
   conn = check_sdb_in_thd(thd, true);
   if (NULL == conn) {
     rc = HA_ERR_NO_CONNECTION;
@@ -1401,14 +1414,6 @@ bool ha_sdb::inplace_alter_table(TABLE *altered_table,
     goto error;
   }
 
-  if (ha_alter_info->handler_flags & inplace_online_addidx) {
-    rc = create_index(cl, ha_alter_info);
-    if (0 != rc) {
-      SDB_PRINT_ERROR(ER_GET_ERRNO, ER(ER_GET_ERRNO), rc);
-      rs = true;
-      goto error;
-    }
-  }
   if (ha_alter_info->handler_flags & inplace_online_dropidx) {
     rc = drop_index(cl, ha_alter_info);
     if (0 != rc) {
@@ -1417,18 +1422,16 @@ bool ha_sdb::inplace_alter_table(TABLE *altered_table,
       goto error;
     }
   }
-  if (ha_alter_info->handler_flags &
-      ~(inplace_online_addidx | inplace_online_dropidx |
-        Alter_inplace_info::ADD_COLUMN | Alter_inplace_info::DROP_COLUMN |
-        Alter_inplace_info::ALTER_STORED_COLUMN_ORDER |
-        Alter_inplace_info::ALTER_STORED_COLUMN_TYPE |
-        Alter_inplace_info::ALTER_COLUMN_DEFAULT |
-        Alter_inplace_info::ALTER_COLUMN_EQUAL_PACK_LENGTH)) {
-    SDB_PRINT_ERROR(HA_ERR_UNSUPPORTED,
-                    "Storage engine doesn't support the operation.");
-    rs = true;
-    goto error;
+
+  if (ha_alter_info->handler_flags & inplace_online_addidx) {
+    rc = create_index(cl, ha_alter_info);
+    if (0 != rc) {
+      SDB_PRINT_ERROR(ER_GET_ERRNO, ER(ER_GET_ERRNO), rc);
+      rs = true;
+      goto error;
+    }
   }
+
 done:
   return rs;
 error:
