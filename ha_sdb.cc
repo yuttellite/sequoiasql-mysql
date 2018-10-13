@@ -283,151 +283,12 @@ int ha_sdb::row_to_obj(uchar *buf, bson::BSONObj &obj, bool output_null,
 
   for (Field **field = table->field; *field; field++) {
     if ((*field)->is_null()) {
-      // get the null field
       if (output_null) {
         null_obj_builder.append((*field)->field_name, "");
       }
-      continue;
-    }
-
-    // TODO: process the quotes
-    switch ((*field)->type()) {
-      case MYSQL_TYPE_SHORT:
-      case MYSQL_TYPE_LONG:
-      case MYSQL_TYPE_TINY:
-      case MYSQL_TYPE_YEAR:
-      case MYSQL_TYPE_INT24: {
-        if (((Field_num *)(*field))->unsigned_flag) {
-          obj_builder.append((*field)->field_name,
-                             (long long)((*field)->val_int()));
-        } else {
-          obj_builder.append((*field)->field_name, (int)(*field)->val_int());
-        }
-        break;
-      }
-      case MYSQL_TYPE_LONGLONG: {
-        if (((Field_num *)(*field))->unsigned_flag) {
-          my_decimal tmp_val;
-          char buff[MAX_FIELD_WIDTH];
-          String str(buff, sizeof(buff), (*field)->charset());
-          ((Field_num *)(*field))->val_decimal(&tmp_val);
-          my_decimal2string(E_DEC_FATAL_ERROR, &tmp_val, 0, 0, 0, &str);
-          obj_builder.appendDecimal((*field)->field_name, str.c_ptr());
-        } else {
-          obj_builder.append((*field)->field_name, (*field)->val_int());
-        }
-        break;
-      }
-      case MYSQL_TYPE_FLOAT:
-      case MYSQL_TYPE_DOUBLE:
-      case MYSQL_TYPE_TIME: {
-        obj_builder.append((*field)->field_name, (*field)->val_real());
-        break;
-      }
-      case MYSQL_TYPE_VARCHAR:
-      case MYSQL_TYPE_STRING:
-      case MYSQL_TYPE_VAR_STRING:
-      case MYSQL_TYPE_TINY_BLOB:
-      case MYSQL_TYPE_MEDIUM_BLOB:
-      case MYSQL_TYPE_LONG_BLOB:
-      case MYSQL_TYPE_BLOB: {
-        Field_str *f = (Field_str *)(*field);
-        String *str;
-        String val_tmp;
-        (*field)->val_str(&val_tmp, &val_tmp);
-        if (f->binary()) {
-          obj_builder.appendBinData((*field)->field_name, val_tmp.length(),
-                                    bson::BinDataGeneral, val_tmp.ptr());
-        } else {
-          str = &val_tmp;
-          if (!my_charset_same(str->charset(), &SDB_CHARSET)) {
-            rc = sdb_convert_charset(*str, conv_str, &SDB_CHARSET);
-            if (rc) {
-              goto error;
-            }
-            str = &conv_str;
-          }
-
-          obj_builder.appendStrWithNoTerminating((*field)->field_name,
-                                                 str->ptr(), str->length());
-        }
-        break;
-      }
-      case MYSQL_TYPE_NEWDECIMAL:
-      case MYSQL_TYPE_DECIMAL: {
-        Field_decimal *f = (Field_decimal *)(*field);
-        int precision = (int)(f->pack_length());
-        int scale = (int)(f->decimals());
-        if (precision < 0 || scale < 0) {
-          rc = -1;
-          goto error;
-        }
-        char buff[MAX_FIELD_WIDTH];
-        String str(buff, sizeof(buff), (*field)->charset());
-        String unused;
-        f->val_str(&str, &unused);
-        obj_builder.appendDecimal((*field)->field_name, str.c_ptr());
-        break;
-      }
-
-      case MYSQL_TYPE_DATE: {
-        longlong date_val = 0;
-        date_val = ((Field_newdate *)(*field))->val_int();
-        struct tm tm_val;
-        tm_val.tm_sec = 0;
-        tm_val.tm_min = 0;
-        tm_val.tm_hour = 0;
-        tm_val.tm_mday = date_val % 100;
-        date_val = date_val / 100;
-        tm_val.tm_mon = date_val % 100 - 1;
-        date_val = date_val / 100;
-        tm_val.tm_year = date_val - 1900;
-        tm_val.tm_wday = 0;
-        tm_val.tm_yday = 0;
-        tm_val.tm_isdst = 0;
-        time_t time_tmp = mktime(&tm_val);
-        bson::Date_t dt((longlong)(time_tmp * 1000));
-        obj_builder.appendDate((*field)->field_name, dt);
-        break;
-      }
-      case MYSQL_TYPE_TIMESTAMP2:
-      case MYSQL_TYPE_TIMESTAMP: {
-        struct timeval tm;
-        int warnings = 0;
-        (*field)->get_timestamp(&tm, &warnings);
-        obj_builder.appendTimestamp((*field)->field_name, tm.tv_sec * 1000,
-                                    tm.tv_usec);
-        break;
-      }
-
-        /*case MYSQL_TYPE_TIMESTAMP2:
-           {
-              Field_timestampf *f = (Field_timestampf *)(*field) ;
-              struct timeval tm ;
-              f->get_timestamp( &tm, NULL ) ;
-              obj_builder.appendTimestamp( (*field)->field_name,
-                                           tm.tv_sec*1000,
-                                           tm.tv_usec ) ;
-              break ;
-           }*/
-
-      case MYSQL_TYPE_NULL:
-        // skip the null value
-        break;
-
-      case MYSQL_TYPE_DATETIME: {
-        char buff[MAX_FIELD_WIDTH];
-        String str(buff, sizeof(buff), (*field)->charset());
-        String unused;
-        (*field)->val_str(&str, &unused);
-        obj_builder.append((*field)->field_name, str.c_ptr());
-        break;
-      }
-
-      default: {
-        SDB_PRINT_ERROR(ER_BAD_FIELD_ERROR, ER(ER_BAD_FIELD_ERROR),
-                        (*field)->field_name, table_name);
-        rc = -1;
+    } else {
+      rc = field_to_obj(*field, obj_builder);
+      if (0 != rc) {
         goto error;
       }
     }
@@ -438,6 +299,201 @@ int ha_sdb::row_to_obj(uchar *buf, bson::BSONObj &obj, bool output_null,
 done:
   if (buf != table->record[0]) {
     repoint_field_to_record(table, buf, table->record[0]);
+  }
+  dbug_tmp_restore_column_map(table->read_set, org_bitmap);
+  return rc;
+error:
+  goto done;
+}
+
+int ha_sdb::field_to_obj(Field *field, bson::BSONObjBuilder &obj_builder) {
+  int rc = 0;
+
+  DBUG_ASSERT(NULL != field);
+
+  // TODO: process the quotes
+  switch (field->type()) {
+    case MYSQL_TYPE_SHORT:
+    case MYSQL_TYPE_LONG:
+    case MYSQL_TYPE_TINY:
+    case MYSQL_TYPE_YEAR:
+    case MYSQL_TYPE_INT24: {
+      if (((Field_num *)field)->unsigned_flag) {
+        obj_builder.append(field->field_name, (long long)(field->val_int()));
+      } else {
+        obj_builder.append(field->field_name, (int)field->val_int());
+      }
+      break;
+    }
+    case MYSQL_TYPE_LONGLONG: {
+      if (((Field_num *)field)->unsigned_flag) {
+        my_decimal tmp_val;
+        char buff[MAX_FIELD_WIDTH];
+        String str(buff, sizeof(buff), field->charset());
+        ((Field_num *)field)->val_decimal(&tmp_val);
+        my_decimal2string(E_DEC_FATAL_ERROR, &tmp_val, 0, 0, 0, &str);
+        obj_builder.appendDecimal(field->field_name, str.c_ptr());
+      } else {
+        obj_builder.append(field->field_name, field->val_int());
+      }
+      break;
+    }
+    case MYSQL_TYPE_FLOAT:
+    case MYSQL_TYPE_DOUBLE:
+    case MYSQL_TYPE_TIME: {
+      obj_builder.append(field->field_name, field->val_real());
+      break;
+    }
+    case MYSQL_TYPE_VARCHAR:
+    case MYSQL_TYPE_STRING:
+    case MYSQL_TYPE_VAR_STRING:
+    case MYSQL_TYPE_TINY_BLOB:
+    case MYSQL_TYPE_MEDIUM_BLOB:
+    case MYSQL_TYPE_LONG_BLOB:
+    case MYSQL_TYPE_BLOB: {
+      Field_str *f = (Field_str *)field;
+      String *str;
+      String val_tmp;
+      field->val_str(&val_tmp, &val_tmp);
+      if (f->binary()) {
+        obj_builder.appendBinData(field->field_name, val_tmp.length(),
+                                  bson::BinDataGeneral, val_tmp.ptr());
+      } else {
+        str = &val_tmp;
+        if (!my_charset_same(str->charset(), &SDB_CHARSET)) {
+          rc = sdb_convert_charset(*str, conv_str, &SDB_CHARSET);
+          if (rc) {
+            goto error;
+          }
+          str = &conv_str;
+        }
+
+        obj_builder.appendStrWithNoTerminating(field->field_name, str->ptr(),
+                                               str->length());
+      }
+      break;
+    }
+    case MYSQL_TYPE_NEWDECIMAL:
+    case MYSQL_TYPE_DECIMAL: {
+      Field_decimal *f = (Field_decimal *)field;
+      int precision = (int)(f->pack_length());
+      int scale = (int)(f->decimals());
+      if (precision < 0 || scale < 0) {
+        rc = -1;
+        goto error;
+      }
+      char buff[MAX_FIELD_WIDTH];
+      String str(buff, sizeof(buff), field->charset());
+      String unused;
+      f->val_str(&str, &unused);
+      obj_builder.appendDecimal(field->field_name, str.c_ptr());
+      break;
+    }
+    case MYSQL_TYPE_DATE: {
+      longlong date_val = 0;
+      date_val = ((Field_newdate *)field)->val_int();
+      struct tm tm_val;
+      tm_val.tm_sec = 0;
+      tm_val.tm_min = 0;
+      tm_val.tm_hour = 0;
+      tm_val.tm_mday = date_val % 100;
+      date_val = date_val / 100;
+      tm_val.tm_mon = date_val % 100 - 1;
+      date_val = date_val / 100;
+      tm_val.tm_year = date_val - 1900;
+      tm_val.tm_wday = 0;
+      tm_val.tm_yday = 0;
+      tm_val.tm_isdst = 0;
+      time_t time_tmp = mktime(&tm_val);
+      bson::Date_t dt((longlong)(time_tmp * 1000));
+      obj_builder.appendDate(field->field_name, dt);
+      break;
+    }
+    case MYSQL_TYPE_TIMESTAMP2:
+    case MYSQL_TYPE_TIMESTAMP: {
+      struct timeval tm;
+      int warnings = 0;
+      field->get_timestamp(&tm, &warnings);
+      obj_builder.appendTimestamp(field->field_name, tm.tv_sec * 1000,
+                                  tm.tv_usec);
+      break;
+    }
+
+      /*case MYSQL_TYPE_TIMESTAMP2:
+      {
+        Field_timestampf *f = (Field_timestampf *)(*field) ;
+        struct timeval tm ;
+        f->get_timestamp( &tm, NULL ) ;
+        obj_builder.appendTimestamp( (*field)->field_name,
+                                      tm.tv_sec*1000,
+                                      tm.tv_usec ) ;
+        break ;
+      }*/
+
+    case MYSQL_TYPE_NULL:
+      // skip the null value
+      break;
+    case MYSQL_TYPE_DATETIME: {
+      char buff[MAX_FIELD_WIDTH];
+      String str(buff, sizeof(buff), field->charset());
+      String unused;
+      field->val_str(&str, &unused);
+      obj_builder.append(field->field_name, str.c_ptr());
+      break;
+    }
+    default: {
+      SDB_PRINT_ERROR(ER_BAD_FIELD_ERROR, ER(ER_BAD_FIELD_ERROR),
+                      field->field_name, table_name);
+      rc = ER_BAD_FIELD_ERROR;
+      goto error;
+    }
+  }
+
+done:
+  return rc;
+error:
+  goto done;
+}
+
+int ha_sdb::get_update_obj(const uchar *old_data, uchar *new_data,
+                           bson::BSONObj &obj, bson::BSONObj &null_obj) {
+  int rc = 0;
+  uint row_offset = (uint)(old_data - new_data);
+  bson::BSONObjBuilder obj_builder;
+  bson::BSONObjBuilder null_obj_builder;
+
+  my_bitmap_map *org_bitmap = dbug_tmp_use_all_columns(table, table->read_set);
+  if (new_data != table->record[0]) {
+    repoint_field_to_record(table, table->record[0], new_data);
+  }
+
+  for (Field **fields = table->field; *fields; fields++) {
+    Field *field = *fields;
+    bool is_null = field->is_null();
+    if (is_null != field->is_null_in_record(old_data)) {
+      if (is_null) {
+        null_obj_builder.append(field->field_name, "");
+      } else {
+        rc = field_to_obj(field, obj_builder);
+        if (0 != rc) {
+          goto error;
+        }
+      }
+    } else if (!is_null) {
+      if (field->cmp_binary_offset(row_offset) != 0) {
+        rc = field_to_obj(field, obj_builder);
+        if (0 != rc) {
+          goto error;
+        }
+      }
+    }
+  }
+  obj = obj_builder.obj();
+  null_obj = null_obj_builder.obj();
+
+done:
+  if (new_data != table->record[0]) {
+    repoint_field_to_record(table, new_data, table->record[0]);
   }
   dbug_tmp_restore_column_map(table->read_set, org_bitmap);
   return rc;
@@ -536,14 +592,16 @@ error:
 
 int ha_sdb::update_row(const uchar *old_data, uchar *new_data) {
   int rc = 0;
-  bson::BSONObj old_obj, new_obj, rule_obj, null_obj;
+  bson::BSONObj new_obj;
+  bson::BSONObj null_obj;
+  bson::BSONObj rule_obj;
 
   DBUG_ASSERT(NULL != collection);
   DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
 
   ha_statistic_increment(&SSV::ha_update_count);
 
-  rc = row_to_obj(new_data, new_obj, TRUE, null_obj);
+  rc = get_update_obj(old_data, new_data, new_obj, null_obj);
   if (rc != 0) {
     if (HA_ERR_UNKNOWN_CHARSET == rc && ha_thd()->lex->is_ignore()) {
       rc = 0;
@@ -552,8 +610,14 @@ int ha_sdb::update_row(const uchar *old_data, uchar *new_data) {
     }
   }
 
-  rule_obj = BSON("$set" << new_obj << "$unset" << null_obj);
-  rc = collection->update(rule_obj, cur_rec);
+  if (null_obj.isEmpty()) {
+    rule_obj = BSON("$set" << new_obj);
+  } else {
+    rule_obj = BSON("$set" << new_obj << "$unset" << null_obj);
+  }
+
+  rc = collection->update(rule_obj, cur_rec, sdbclient::_sdbStaticObject,
+                          UPDATE_KEEP_SHARDINGKEY);
 
   // ignore duplicate key
   if (SDB_IXM_DUP_KEY == get_sdb_code(rc) && ha_thd()->lex &&

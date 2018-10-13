@@ -268,6 +268,11 @@ class ha_sdb : public handler {
   int row_to_obj(uchar *buf, bson::BSONObj &obj, bool output_null,
                  bson::BSONObj &null_obj);
 
+  int field_to_obj(Field *field, bson::BSONObjBuilder &obj_builder);
+
+  int get_update_obj(const uchar *old_data, uchar *new_data, bson::BSONObj &obj,
+                     bson::BSONObj &null_obj);
+
   int next_row(bson::BSONObj &obj, uchar *buf);
 
   int cur_row(uchar *buf);
