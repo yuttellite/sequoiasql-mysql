@@ -530,6 +530,12 @@ int ha_sdb::flush_bulk_insert(bool ignore_dup_key) {
   int flag = ignore_dup_key ? FLG_INSERT_CONTONDUP : 0;
 
   int rc = collection->bulk_insert(flag, m_bulk_insert_rows);
+  if (rc != 0) {
+    if (SDB_IXM_DUP_KEY == get_sdb_code(rc)) {
+      // convert to MySQL errcode
+      rc = HA_ERR_FOUND_DUPP_KEY;
+    }
+  }
   m_bulk_insert_rows.clear();
   return rc;
 }
@@ -574,12 +580,11 @@ int ha_sdb::write_row(uchar *buf) {
     }
   } else {
     rc = collection->insert(obj);
-
-    // ignore duplicate key
-    if (SDB_IXM_DUP_KEY == get_sdb_code(rc) && ignore_dup_key) {
-      rc = HA_ERR_FOUND_DUPP_KEY;
-    }
     if (rc != 0) {
+      if (SDB_IXM_DUP_KEY == get_sdb_code(rc)) {
+        // convert to MySQL errcode
+        rc = HA_ERR_FOUND_DUPP_KEY;
+      }
       goto error;
     }
   }
@@ -618,16 +623,14 @@ int ha_sdb::update_row(const uchar *old_data, uchar *new_data) {
 
   rc = collection->update(rule_obj, cur_rec, sdbclient::_sdbStaticObject,
                           UPDATE_KEEP_SHARDINGKEY);
-
-  // ignore duplicate key
-  if (SDB_IXM_DUP_KEY == get_sdb_code(rc) && ha_thd()->lex &&
-      ha_thd()->lex->is_ignore()) {
-    rc = HA_ERR_FOUND_DUPP_KEY;
-  }
-
   if (rc != 0) {
+    if (SDB_IXM_DUP_KEY == get_sdb_code(rc)) {
+      // convert to MySQL errcode
+      rc = HA_ERR_FOUND_DUPP_KEY;
+    }
     goto error;
   }
+
 done:
   return rc;
 error:
