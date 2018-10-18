@@ -1688,25 +1688,25 @@ int ha_sdb::get_cl_options(TABLE *form, HA_CREATE_INFO *create_info,
     if (beOptions.type() == bson::Object) {
       options = beOptions.embeddedObject().copy();
       goto done;
-    }
-    if (beOptions.type() != bson::EOO) {
+    } else if (beOptions.type() != bson::EOO) {
       rc = SDB_ERR_INVALID_ARG;
       SDB_PRINT_ERROR(rc, "Failed to parse cl_options!");
       goto error;
     }
   }
 
-  // TODO: get sdb_auto_split from configure
   if (!use_partition) {
     goto done;
   }
+
   rc = get_sharding_key(form, sharding_key);
   if (rc != 0) {
     goto error;
   }
+
   if (!sharding_key.isEmpty()) {
-    options = BSON("ShardingKey" << sharding_key << "EnsureShardingIndex"
-                                 << false << "Compressed" << true);
+    options = BSON("ShardingKey" << sharding_key
+                  << "AutoSplit" << true);
   }
 
 done:
