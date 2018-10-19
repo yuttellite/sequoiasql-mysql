@@ -33,7 +33,7 @@ class Sdb_cond_ctx : public Sql_alloc {
 
   ~Sdb_cond_ctx();
 
-  void push(Item *cond_item);
+  void push(Item *item);
 
   void pop();
 

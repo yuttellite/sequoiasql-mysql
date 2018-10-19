@@ -1705,8 +1705,7 @@ int ha_sdb::get_cl_options(TABLE *form, HA_CREATE_INFO *create_info,
   }
 
   if (!sharding_key.isEmpty()) {
-    options = BSON("ShardingKey" << sharding_key
-                  << "AutoSplit" << true);
+    options = BSON("ShardingKey" << sharding_key << "AutoSplit" << true);
   }
 
 done:
@@ -1839,6 +1838,9 @@ void ha_sdb::unlock_row() {
 const Item *ha_sdb::cond_push(const Item *cond) {
   const Item *remain_cond = cond;
   Sdb_cond_ctx sdb_condition;
+
+  // we can handle the condition which only involved current table,
+  // can't handle conditions which involved other tables
   if (cond->used_tables() & ~table->pos_in_table_list->map()) {
     goto done;
   }

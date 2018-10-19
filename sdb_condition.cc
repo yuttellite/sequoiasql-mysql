@@ -145,18 +145,19 @@ bool Sdb_cond_ctx::keep_on() {
   return true;
 }
 
-void Sdb_cond_ctx::push(Item *cond_item) {
+void Sdb_cond_ctx::push(Item *item) {
   int rc = SDB_ERR_OK;
   Sdb_item *item_tmp = NULL;
+
+  // get the real item
+  // see aslo Item_ref
+  Item *cond_item = (NULL == item) ? NULL : item->real_item();
+
   if (!keep_on()) {
     goto done;
   }
 
   if (NULL != cur_item) {
-    /*      if ( NULL == cond_item
-               || ( Item::COND_ITEM != cond_item->type()
-                    && ( Item::FUNC_ITEM != cond_item->type()
-                         || cond_item->const_item() )))*/
     if (NULL == cond_item || (Item::FUNC_ITEM != cond_item->type() &&
                               Item::COND_ITEM != cond_item->type())) {
       rc = cur_item->push(cond_item);
@@ -175,11 +176,6 @@ void Sdb_cond_ctx::push(Item *cond_item) {
         }
       }
 
-      /*//func_item should go on to skip the param by create unkonw_func_item
-      if ( NULL == cond_item || Item::FUNC_ITEM != cond_item->type() )
-      {
-         goto done ;
-      }*/
       goto done;
     }
   }
@@ -279,7 +275,6 @@ Sdb_item *Sdb_cond_ctx::create_sdb_item(Item_func *cond_item) {
     }
     default: {
       item = new Sdb_func_unkown(cond_item);
-      // update_stat( SDB_ERR_COND_PART_UNSUPPORTED ) ;
       break;
     }
   }
