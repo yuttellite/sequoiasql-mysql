@@ -1,97 +1,110 @@
 # Copyright (c) 2006, 2016, Oracle and/or its affiliates. All rights reserved.
-# 
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; version 2 of the License.
-# 
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-# 
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
-
-
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License along with
+# this program; if not, write to the Free Software Foundation, Inc., 51 Franklin
+# St, Fifth Floor, Boston, MA  02110-1301 USA
 
 # Usage: cmake -DSDB_BUILT_IN=ON -DWITH_SDB_DRIVER=/opt/sequoiadb
 #
 # [SDB_BUILT_IN]: compile as built-in plugin or module plugin.
-# [WITH_SDB_DRIVER]: the path to SequoiaDB cpp driver, which must 
-#     contain include/ and lib/libsdbcpp.so
+# [WITH_SDB_DRIVER]: the path to SequoiaDB cpp driver, which must contain
+# include/ and lib/libsdbcpp.so
 
-IF(SDB_DRIVER_VERSION)
-  ADD_DEFINITIONS(-DSDB_DRIVER_VERSION=\"${SDB_DRIVER_VERSION}\")
-ENDIF()
-IF(SDB_PLUGIN_VERSION)
-  ADD_DEFINITIONS(-DSDB_PLUGIN_VERSION=\"${SDB_PLUGIN_VERSION}\")
-ENDIF()
-IF(CMAKE_BUILD_TYPE MATCHES "Debug")
-  ADD_DEFINITIONS(-DDEBUG)
-ENDIF()
-ADD_DEFINITIONS(-Wno-error)
+if(SDB_DRIVER_VERSION)
+  add_definitions(-DSDB_DRIVER_VERSION=\"${SDB_DRIVER_VERSION}\")
+endif()
+if(SDB_PLUGIN_VERSION)
+  add_definitions(-DSDB_PLUGIN_VERSION=\"${SDB_PLUGIN_VERSION}\")
+endif()
+if(CMAKE_BUILD_TYPE MATCHES "Debug")
+  add_definitions(-DDEBUG)
+endif()
+add_definitions(-Wno-error)
 
-SET(SEQUOIADB_SOURCES
-ha_sdb.cc
-sdb_conf.cc
-sdb_util.cc
-sdb_conn.cc
-sdb_thd.cc
-sdb_condition.cc
-sdb_item.cc
-sdb_cl.cc
-sdb_errcode.cc
-sdb_log.cc
-sdb_idx.cc)
+set(SEQUOIADB_SOURCES
+    ha_sdb.cc
+    sdb_conf.cc
+    sdb_util.cc
+    sdb_conn.cc
+    sdb_thd.cc
+    sdb_condition.cc
+    sdb_item.cc
+    sdb_cl.cc
+    sdb_errcode.cc
+    sdb_log.cc
+    sdb_idx.cc)
 
-SET(WITH_SDB_DRIVER "" CACHE PATH "Path to SequoiaDB cpp driver")
-SET(SDB_DRIVER_PATH ${WITH_SDB_DRIVER})
+set(WITH_SDB_DRIVER "" CACHE PATH "Path to SequoiaDB C++ driver")
+set(SDB_DRIVER_PATH ${WITH_SDB_DRIVER})
 
-FIND_PATH(SDB_INCLUDE_DIR
-  NAMES client.hpp
-  HINTS ${SDB_DRIVER_PATH}/include
-)
+find_path(SDB_INCLUDE_DIR NAMES client.hpp HINTS ${SDB_DRIVER_PATH}/include)
 
-IF(${SDB_INCLUDE_DIR} STREQUAL "SDB_INCLUDE_DIR-NOTFOUND")
-  MESSAGE(SEND_ERROR
-    "Cannot find appropriate headers of SequoiaDB cpp driver from ${SDB_DRIVER_PATH}")
-ENDIF()
-MESSAGE(STATUS "SDB_INCLUDE_DIR = ${SDB_INCLUDE_DIR}")
+if(${SDB_INCLUDE_DIR} STREQUAL "SDB_INCLUDE_DIR-NOTFOUND")
+  message(
+    SEND_ERROR
+      "Cannot find appropriate headers of SequoiaDB C++ driver from ${SDB_DRIVER_PATH}"
+    )
+endif()
+message(STATUS "SDB_INCLUDE_DIR = ${SDB_INCLUDE_DIR}")
+include_directories(${SDB_INCLUDE_DIR})
 
-INCLUDE_DIRECTORIES(
-  ${SDB_INCLUDE_DIR}
-)
+set(SDB_BUILT_IN ON CACHE BOOL "Build SequoiaDB storage engine in mysqld")
+mark_as_advanced(SDB_BUILT_IN)
+message(STATUS "SDB_BUILT_IN = ${SDB_BUILT_IN}")
 
-FIND_LIBRARY(SDB_LIBRARY
-  NAMES libsdbcpp.so
-  HINTS ${SDB_DRIVER_PATH}/lib
-)
+set(SDB_LDFLAGS "-Wl,-rpath,${CMAKE_INSTALL_PREFIX}/lib")
 
-IF(${SDB_LIBRARY} STREQUAL "SDB_LIBRARY-NOTFOUND")
-  MESSAGE(SEND_ERROR
-    "Cannot find libsdbcpp.so from ${SDB_DRIVER_PATH}")
-ENDIF()
-MESSAGE(STATUS "SDB_LIBRARY = ${SDB_LIBRARY}")
+if(SDB_BUILT_IN)
+  # builtin storage engine use C++ dynamic driver
+  find_library(SDB_DYNAMIC_LIBRARY
+               NAMES libsdbcpp.so
+               HINTS ${SDB_DRIVER_PATH}/lib)
+  if(${SDB_DYNAMIC_LIBRARY} STREQUAL "SDB_DYNAMIC_LIBRARY-NOTFOUND")
+    message(SEND_ERROR "Cannot find libsdbcpp.so from ${SDB_DRIVER_PATH}/lib")
+  endif()
+  message(STATUS "Using SequoiaDB dynamic library: ${SDB_DYNAMIC_LIBRARY}")
 
-SET(SDB_BUILT_IN ON CACHE BOOL "Build SequoiaDB storage engine in mysqld")
-MARK_AS_ADVANCED(SDB_BUILT_IN)
-SET(SDB_LDFLAGS "-Wl,-rpath,${CMAKE_INSTALL_PREFIX}/lib")
+  mysql_add_plugin(sequoiadb
+                   ${SEQUOIADB_SOURCES}
+                   STORAGE_ENGINE
+                   MANDATORY
+                   RECOMPILE_FOR_EMBEDDED
+                   LINK_LIBRARIES
+                   ${SDB_DYNAMIC_LIBRARY})
 
-IF(SDB_BUILT_IN)
-  MYSQL_ADD_PLUGIN(sequoiadb ${SEQUOIADB_SOURCES} STORAGE_ENGINE MANDATORY RECOMPILE_FOR_EMBEDDED
-      LINK_LIBRARIES ${SDB_LIBRARY})
+  string(FIND "${WITH_MYSQLD_LDFLAGS}" "${SDB_LDFLAGS}" POS)
+  if(${POS} EQUAL -1)
+    set(WITH_MYSQLD_LDFLAGS "${WITH_MYSQLD_LDFLAGS} ${SDB_LDFLAGS}"
+        CACHE STRING "Additional linker flags for mysqld"
+        FORCE)
+  endif()
 
-  STRING(FIND "${WITH_MYSQLD_LDFLAGS}" "${SDB_LDFLAGS}" POS)
-  IF(${POS} EQUAL -1)
-    SET(WITH_MYSQLD_LDFLAGS "${WITH_MYSQLD_LDFLAGS} ${SDB_LDFLAGS}" 
-        CACHE STRING "Additional linker flags for mysqld" FORCE)
-  ENDIF()
-ELSE()
-  MYSQL_ADD_PLUGIN(sequoiadb ${SEQUOIADB_SOURCES} STORAGE_ENGINE MODULE_ONLY
-      LINK_LIBRARIES ${SDB_LIBRARY})
-  SET_TARGET_PROPERTIES(sequoiadb PROPERTIES LINK_FLAGS ${SDB_LDFLAGS})
-ENDIF()
- 
-INSTALL(FILES ${SDB_LIBRARY} DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
+  install(FILES ${SDB_DYNAMIC_LIBRARY} DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
+else()
+  # use C++ static driver
+  find_library(SDB_STATIC_LIBRARY
+               NAMES libstaticsdbcpp.a
+               HINTS ${SDB_DRIVER_PATH}/lib)
+  if(${SDB_STATIC_LIBRARY} STREQUAL "SDB_STATIC_LIBRARY-NOTFOUND")
+    message(
+      SEND_ERROR "Cannot find libstaticsdbcpp.a from ${SDB_DRIVER_PATH}/lib")
+  endif()
+  message(STATUS "Using SequoiaDB static library: ${SDB_STATIC_LIBRARY}")
 
+  mysql_add_plugin(sequoiadb
+                   ${SEQUOIADB_SOURCES}
+                   STORAGE_ENGINE
+                   MODULE_ONLY
+                   LINK_LIBRARIES
+                   ${SDB_STATIC_LIBRARY})
+  set_target_properties(sequoiadb PROPERTIES LINK_FLAGS ${SDB_LDFLAGS})
+endif()

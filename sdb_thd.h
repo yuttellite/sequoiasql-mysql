@@ -16,8 +16,7 @@
 #ifndef SDB_THD__H
 #define SDB_THD__H
 
-#include <sql_class.h>
-#include <mysql/psi/mysql_thread.h>
+#include <mysql/plugin.h>
 #include <client.hpp>
 #include "sdb_conn.h"
 

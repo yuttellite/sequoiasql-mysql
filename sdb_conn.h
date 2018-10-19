@@ -16,8 +16,8 @@
 #ifndef SDB_CONN__H
 #define SDB_CONN__H
 
-#include <mysql/psi/mysql_thread.h>
 #include <my_global.h>
+#include <my_thread_local.h>
 #include "client.hpp"
 
 class Sdb_cl;

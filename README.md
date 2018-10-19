@@ -10,7 +10,7 @@ In order to take advantages of scalability and performance, SequoiaSQL - MySQL S
 ## Building
 
 1. Get boost-1.59.0 and the source code of mysql-5.7.18.
-2. Copy the plugin-code to the storage directory.
+2. Copy the plugin code to the storage directory.
  ```bash
 mkdir -p mysql-5.7.18/storage/sequoiadb
 cp sequoiasql-mysql/* mysql-5.7.18/storage/sequoiadb
@@ -19,9 +19,10 @@ cp sequoiasql-mysql/* mysql-5.7.18/storage/sequoiadb
  ```bash
 cd mysql-5.7.18
 cmake . -DWITH_BOOST=../thirdparty/boost/boost_1_59_0/ -DCMAKE_INSTALL_PREFIX=/opt/mysql -DMYSQL_DATADIR=/opt/mysql/data -DWITH_SDB_DRIVER=/opt/sequoiadb -DCMAKE_BUILD_TYPE=Release
-make -j 4
-make install
+make install -j 4
  ```
+
+By default, the sequoiadb storage engine is built into MySQL. You can add `-DSDB_BUILT_IN=OFF` to build it as a dynamic library.
 
 ## Coding Guidelines
 
