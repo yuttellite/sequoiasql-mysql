@@ -1790,7 +1790,12 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
   for (uint i = 0; i < form->s->keys; i++) {
     rc = sdb_create_index(form->s->key_info + i, cl);
     if (0 != rc) {
-      goto error;
+      if (SDB_IXM_EXIST_COVERD_ONE == get_sdb_code(rc)) {
+        // ignore duplicate index error caused by sharding key
+        rc = 0;
+      } else {
+        goto error;
+      }
     }
   }
 
