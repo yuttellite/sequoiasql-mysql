@@ -24,6 +24,14 @@ make install -j 4
 
 By default, the sequoiadb storage engine is built into MySQL. You can add `-DSDB_BUILT_IN=OFF` to build it as a dynamic library.
 
+Additional, we use two options to give plugin version and SequoiaDB C++ driver version:
+```
+-DSDB_PLUGIN_VERSION=<git commit short hash>
+-DSDB_DRIVER_VERSION=<driver version>
+```
+
+For example: `-DSDB_PLUGIN_VERSION=4811624 -DSDB_DRIVER_VERSION=3.0.1`.
+
 ## Coding Guidelines
 
 According to [MySQL coding guidelines](https://dev.mysql.com/doc/dev/mysql-server/latest/PAGE_CODING_GUIDELINES.html), we use the [Google C++ coding style](https://google.github.io/styleguide/cppguide.html).
