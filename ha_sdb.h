@@ -300,8 +300,8 @@ class ha_sdb : public handler {
   Sdb_share *share;
   char db_name[SDB_CS_NAME_MAX_SIZE + 1];
   char table_name[SDB_CL_NAME_MAX_SIZE + 1];
-  time_t last_flush_time;
-  int used_times;
+  time_t last_count_time;
+  int count_times;
   MEM_ROOT blobroot;
   int idx_order_direction;
   bool m_use_bulk_insert;

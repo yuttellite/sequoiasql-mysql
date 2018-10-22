@@ -148,10 +148,10 @@ ha_sdb::ha_sdb(handlerton *hton, TABLE_SHARE *table_arg)
   share = NULL;
   collection = NULL;
   first_read = true;
-  used_times = 0;
-  last_flush_time = time(NULL);
+  count_times = 0;
+  last_count_time = time(NULL);
   m_use_bulk_insert = false;
-  stats.records = 2;
+  stats.records = 0;
   memset(db_name, 0, SDB_CS_NAME_MAX_SIZE + 1);
   memset(table_name, 0, SDB_CL_NAME_MAX_SIZE + 1);
   init_alloc_root(sdb_key_memory_blobroot, &blobroot, 8 * 1024, 0);
@@ -536,6 +536,7 @@ int ha_sdb::flush_bulk_insert(bool ignore_dup_key) {
       rc = HA_ERR_FOUND_DUPP_KEY;
     }
   }
+  stats.records += m_bulk_insert_rows.size();
   m_bulk_insert_rows.clear();
   return rc;
 }
@@ -572,7 +573,7 @@ int ha_sdb::write_row(uchar *buf) {
 
   if (m_use_bulk_insert) {
     m_bulk_insert_rows.push_back(obj);
-    if ((int)m_bulk_insert_rows.size() > sdb_bulk_insert_size) {
+    if ((int)m_bulk_insert_rows.size() >= sdb_bulk_insert_size) {
       rc = flush_bulk_insert(ignore_dup_key);
       if (rc != 0) {
         goto error;
@@ -587,6 +588,8 @@ int ha_sdb::write_row(uchar *buf) {
       }
       goto error;
     }
+
+    stats.records++;
   }
 
 done:
@@ -650,6 +653,9 @@ int ha_sdb::delete_row(const uchar *buf) {
   if (rc != 0) {
     goto error;
   }
+
+  stats.records--;
+
 done:
   return rc;
 error:
@@ -1130,33 +1136,33 @@ void ha_sdb::position(const uchar *record) {
 
 int ha_sdb::info(uint flag) {
   int rc = 0;
-  long long rec_num = 2;
+  long long rec_num = 0;
 
   rc = ensure_collection(ha_thd());
   if (0 != rc) {
     goto error;
   }
 
-  if (used_times++ % 100 == 0) {
+  if (count_times++ % 100 == 0) {
     rc = collection->get_count(rec_num);
     if (rc != 0) {
       goto error;
     }
-    last_flush_time = time(NULL);
-    used_times = 1;
-  } else if (used_times % 10 == 0) {
+    last_count_time = time(NULL);
+    count_times = 1;
+  } else if (count_times % 10 == 0) {
     time_t cur_time = time(NULL);
-    // flush rec_num every 5 minutes
-    if (difftime(cur_time, last_flush_time) > 5 * 60) {
+    // get record count every 5 minutes
+    if (difftime(cur_time, last_count_time) > 5 * 60) {
       rc = collection->get_count(rec_num);
       if (rc != 0) {
         goto error;
       }
-      last_flush_time = cur_time;
-      used_times = 1;
+      last_count_time = cur_time;
+      count_times = 1;
     }
   }
-  if (used_times != 1) {
+  if (count_times != 1) {
     goto done;
   }
 
@@ -1176,12 +1182,6 @@ int ha_sdb::info(uint flag) {
   stats.block_size = 0;
   stats.mrr_length_per_rec = 0;
   stats.table_in_mem_estimate = -1;
-
-  // optimizer interprets the values 0 and 1 as EXACT
-  // < 2 should not be returned.
-  if (stats.records < 2) {
-    stats.records = 2;
-  }
 
 done:
   return rc;
@@ -1506,20 +1506,30 @@ error:
 }
 
 int ha_sdb::delete_all_rows() {
+  int rc = 0;
   DBUG_ASSERT(NULL != collection);
   DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
 
   if (collection->is_transaction_on()) {
-    return collection->del();
+    rc = collection->del();
+    if (0 == rc) {
+      stats.records = 0;
+    }
+    return rc;
   }
   return truncate();
 }
 
 int ha_sdb::truncate() {
+  int rc = 0;
   DBUG_ASSERT(NULL != collection);
   DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
 
-  return collection->truncate();
+  rc = collection->truncate();
+  if (0 == rc) {
+    stats.records = 0;
+  }
+  return rc;
 }
 
 ha_rows ha_sdb::records_in_range(uint inx, key_range *min_key,
