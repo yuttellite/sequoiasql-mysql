@@ -1715,7 +1715,10 @@ int ha_sdb::get_cl_options(TABLE *form, HA_CREATE_INFO *create_info,
   }
 
   if (!sharding_key.isEmpty()) {
-    options = BSON("ShardingKey" << sharding_key << "AutoSplit" << true);
+    options = BSON("ShardingKey" << sharding_key << "AutoSplit" << true
+                                 << "EnsureShardingIndex" << false
+                                 << "Compressed" << true << "CompressionType"
+                                 << "lzw");
   }
 
 done:
@@ -1790,12 +1793,9 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
   for (uint i = 0; i < form->s->keys; i++) {
     rc = sdb_create_index(form->s->key_info + i, cl);
     if (0 != rc) {
-      if (SDB_IXM_EXIST_COVERD_ONE == get_sdb_code(rc)) {
-        // ignore duplicate index error caused by sharding key
-        rc = 0;
-      } else {
-        goto error;
-      }
+      // we disabled sharding index,
+      // so do not ignore SDB_IXM_EXIST_COVERD_ONE
+      goto error;
     }
   }
 
