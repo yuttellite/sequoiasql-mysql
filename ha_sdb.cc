@@ -59,8 +59,9 @@ using namespace sdbclient;
 #endif /* DEBUG */
 
 #define SDB_ENGINE_INFO "SequoiaDB storage engine(" SDB_ENGINE_EDITION ")"
-#define SDB_VERSION_INFO \
-  "Plugin: " SDB_PLUGIN_VERSION ", Driver: " SDB_DRIVER_VERSION
+#define SDB_VERSION_INFO                                        \
+  "Plugin: " SDB_PLUGIN_VERSION ", Driver: " SDB_DRIVER_VERSION \
+  ", BuildTime: " __DATE__ " " __TIME__
 
 #define SDB_OID_LEN 12
 #define SDB_FIELD_MAX_LEN (16 * 1024 * 1024)
