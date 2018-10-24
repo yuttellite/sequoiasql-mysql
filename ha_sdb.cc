@@ -581,7 +581,14 @@ int ha_sdb::write_row(uchar *buf) {
       }
     }
   } else {
-    rc = collection->insert(obj);
+    // TODO: SeqoiaDB C++ driver currently has no insert() method with a flag,
+    // we need send FLG_INSERT_CONTONDUP flag to server to ignore duplicate key
+    // error, so that SequoiaDB will not rollback transaction, here we
+    // temporarily use bulk_insert() instead, this should be revised when driver
+    // add new method in new version.
+    std::vector<bson::BSONObj> row(1, obj);
+    int flag = ignore_dup_key ? FLG_INSERT_CONTONDUP : 0;
+    rc = collection->bulk_insert(flag, row);
     if (rc != 0) {
       if (SDB_IXM_DUP_KEY == get_sdb_code(rc)) {
         // convert to MySQL errcode
@@ -1243,23 +1250,30 @@ int ha_sdb::start_statement(THD *thd, uint table_count) {
   }
 
   if (0 == table_count) {
-    if (thd_test_options(thd, OPTION_BEGIN)) {
-      Sdb_conn *conn = check_sdb_in_thd(thd, true);
-      if (NULL == conn) {
-        rc = HA_ERR_NO_CONNECTION;
-        goto error;
-      }
-      DBUG_ASSERT(conn->thread_id() == thd->thread_id());
-
-      rc = conn->begin_transaction();
-      if (rc != 0) {
-        goto error;
-      }
-      trans_register_ha(thd, TRUE, ht, NULL);
+    Sdb_conn *conn = check_sdb_in_thd(thd, true);
+    if (NULL == conn) {
+      rc = HA_ERR_NO_CONNECTION;
+      goto error;
     }
+    DBUG_ASSERT(conn->thread_id() == thd->thread_id());
 
-    // TODO: AUTOCOMMIT
-
+    if (thd_test_options(thd, OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN)) {
+      if (!conn->is_transaction_on()) {
+        rc = conn->begin_transaction();
+        if (rc != 0) {
+          goto error;
+        }
+        trans_register_ha(thd, TRUE, ht, NULL);
+      }
+    } else {
+      // autocommit
+      if (!conn->is_transaction_on()) {
+        rc = conn->begin_transaction();
+        if (rc != 0) {
+          goto error;
+        }
+      }
+    }
   } else {
     // there is more than one handler involved
   }
@@ -1289,7 +1303,7 @@ int ha_sdb::external_lock(THD *thd, int lock_type) {
     }
   } else {
     if (!--thd_sdb->lock_count) {
-      if (!(thd_test_options(thd, OPTION_BEGIN)) &&
+      if (!(thd_test_options(thd, OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN)) &&
           thd_sdb->get_conn()->is_transaction_on()) {
         /*
           Unlock is done without a transaction commit / rollback.
