@@ -314,20 +314,31 @@ int ha_sdb::field_to_obj(Field *field, bson::BSONObjBuilder &obj_builder) {
 
   // TODO: process the quotes
   switch (field->type()) {
-    case MYSQL_TYPE_SHORT:
-    case MYSQL_TYPE_LONG:
+    case MYSQL_TYPE_BIT:
     case MYSQL_TYPE_TINY:
-    case MYSQL_TYPE_YEAR:
+    case MYSQL_TYPE_SHORT:
     case MYSQL_TYPE_INT24: {
-      if (((Field_num *)field)->unsigned_flag) {
-        obj_builder.append(field->field_name, (long long)(field->val_int()));
+      // overflow is impossible, store as INT32
+      DBUG_ASSERT(field->val_int() <= INT_MAX32 ||
+                  field->val_int() >= INT_MIN32);
+      obj_builder.append(field->field_name, (int)field->val_int());
+      break;
+    }
+    case MYSQL_TYPE_LONG:
+    case MYSQL_TYPE_YEAR: {
+      longlong value = field->val_int();
+      if (value > INT_MAX32 || value < INT_MIN32) {
+        // overflow, so store as INT64
+        obj_builder.append(field->field_name, (long long)value);
       } else {
-        obj_builder.append(field->field_name, (int)field->val_int());
+        obj_builder.append(field->field_name, (int)value);
       }
       break;
     }
     case MYSQL_TYPE_LONGLONG: {
-      if (((Field_num *)field)->unsigned_flag) {
+      longlong value = field->val_int();
+      if (value < 0 && ((Field_num *)field)->unsigned_flag) {
+        // overflow, so store as DECIMAL
         my_decimal tmp_val;
         char buff[MAX_FIELD_WIDTH];
         String str(buff, sizeof(buff), field->charset());
@@ -335,7 +346,7 @@ int ha_sdb::field_to_obj(Field *field, bson::BSONObjBuilder &obj_builder) {
         my_decimal2string(E_DEC_FATAL_ERROR, &tmp_val, 0, 0, 0, &str);
         obj_builder.appendDecimal(field->field_name, str.c_ptr());
       } else {
-        obj_builder.append(field->field_name, field->val_int());
+        obj_builder.append(field->field_name, (long long)value);
       }
       break;
     }
