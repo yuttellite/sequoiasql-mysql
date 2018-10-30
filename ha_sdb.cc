@@ -363,15 +363,14 @@ int ha_sdb::field_to_obj(Field *field, bson::BSONObjBuilder &obj_builder) {
     case MYSQL_TYPE_MEDIUM_BLOB:
     case MYSQL_TYPE_LONG_BLOB:
     case MYSQL_TYPE_BLOB: {
-      Field_str *f = (Field_str *)field;
-      String *str;
       String val_tmp;
-      field->val_str(&val_tmp, &val_tmp);
-      if (f->binary()) {
+      field->val_str(&val_tmp);
+      if (((Field_str *)field)->binary()) {
         obj_builder.appendBinData(field->field_name, val_tmp.length(),
                                   bson::BinDataGeneral, val_tmp.ptr());
       } else {
-        str = &val_tmp;
+        String conv_str;
+        String *str = &val_tmp;
         if (!my_charset_same(str->charset(), &SDB_CHARSET)) {
           rc = sdb_convert_charset(*str, conv_str, &SDB_CHARSET);
           if (rc) {
@@ -430,27 +429,29 @@ int ha_sdb::field_to_obj(Field *field, bson::BSONObjBuilder &obj_builder) {
                                   tm.tv_usec);
       break;
     }
-
-      /*case MYSQL_TYPE_TIMESTAMP2:
-      {
-        Field_timestampf *f = (Field_timestampf *)(*field) ;
-        struct timeval tm ;
-        f->get_timestamp( &tm, NULL ) ;
-        obj_builder.appendTimestamp( (*field)->field_name,
-                                      tm.tv_sec*1000,
-                                      tm.tv_usec ) ;
-        break ;
-      }*/
-
     case MYSQL_TYPE_NULL:
       // skip the null value
       break;
     case MYSQL_TYPE_DATETIME: {
       char buff[MAX_FIELD_WIDTH];
       String str(buff, sizeof(buff), field->charset());
-      String unused;
-      field->val_str(&str, &unused);
+      field->val_str(&str);
       obj_builder.append(field->field_name, str.c_ptr());
+      break;
+    }
+    case MYSQL_TYPE_JSON: {
+      String val_tmp, conv_str;
+      field->val_str(&val_tmp);
+      String *str = &val_tmp;
+      if (!my_charset_same(str->charset(), &SDB_CHARSET)) {
+        rc = sdb_convert_charset(*str, conv_str, &SDB_CHARSET);
+        if (rc) {
+          goto error;
+        }
+        str = &conv_str;
+      }
+      obj_builder.appendStrWithNoTerminating(field->field_name, str->ptr(),
+                                             str->length());
       break;
     }
     default: {
@@ -938,17 +939,8 @@ int ha_sdb::obj_to_row(bson::BSONObj &obj, uchar *buf) {
       }
       // datetime is stored as string
       case bson::String: {
-        String org_str(befield.valuestr(), befield.valuestrsize() - 1,
-                       &SDB_CHARSET);
-        String *str = &org_str;
-        if (!my_charset_same((*field)->charset(), &SDB_CHARSET)) {
-          rc = sdb_convert_charset(org_str, conv_str, (*field)->charset());
-          if (rc) {
-            goto error;
-          }
-          str = &conv_str;
-        }
-        (*field)->store(str->ptr(), str->length(), &my_charset_bin);
+        (*field)->store(befield.valuestr(), befield.valuestrsize() - 1,
+                        &SDB_CHARSET);
         break;
       }
       case bson::NumberDecimal: {
