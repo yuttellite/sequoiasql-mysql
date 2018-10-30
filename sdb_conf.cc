@@ -19,12 +19,14 @@ static const char *SDB_ADDR_DFT = "localhost:11810";
 static const my_bool SDB_USE_PARTITION_DFT = TRUE;
 static const my_bool SDB_DEBUG_LOG_DFT = FALSE;
 static const my_bool SDB_DEFAULT_USE_BULK_INSERT = FALSE;
+static const my_bool SDB_DEFAULT_USE_AUTOCOMMIT = TRUE;
 static const int SDB_DEFAULT_BULK_INSERT_SIZE = 100;
 
 char *sdb_conn_str = NULL;
 my_bool sdb_use_partition = SDB_USE_PARTITION_DFT;
 my_bool sdb_use_bulk_insert = SDB_DEFAULT_USE_BULK_INSERT;
 int sdb_bulk_insert_size = SDB_DEFAULT_BULK_INSERT_SIZE;
+my_bool sdb_use_autocommit = SDB_DEFAULT_USE_AUTOCOMMIT;
 my_bool sdb_debug_log = SDB_DEBUG_LOG_DFT;
 
 static void sdb_use_partition_update(THD *thd, struct st_mysql_sys_var *var,
@@ -42,6 +44,11 @@ static void sdb_bulk_insert_size_update(THD *thd, struct st_mysql_sys_var *var,
   *static_cast<int *>(var_ptr) = *static_cast<const int *>(save);
 }
 
+static void sdb_use_autocommit_update(THD *thd, struct st_mysql_sys_var *var,
+                                      void *var_ptr, const void *save) {
+  *static_cast<my_bool *>(var_ptr) = *static_cast<const my_bool *>(save);
+}
+
 static void sdb_debug_log_update(THD *thd, struct st_mysql_sys_var *var,
                                  void *var_ptr, const void *save) {
   *static_cast<my_bool *>(var_ptr) = *static_cast<const my_bool *>(save);
@@ -49,7 +56,7 @@ static void sdb_debug_log_update(THD *thd, struct st_mysql_sys_var *var,
 
 static MYSQL_SYSVAR_STR(conn_addr, sdb_conn_str,
                         PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_READONLY,
-                        "Sequoiadb addr", NULL, NULL, SDB_ADDR_DFT);
+                        "SequoiaDB addresses", NULL, NULL, SDB_ADDR_DFT);
 static MYSQL_SYSVAR_BOOL(use_partition, sdb_use_partition, PLUGIN_VAR_OPCMDARG,
                          "create partition table on sequoiadb", NULL,
                          sdb_use_partition_update, SDB_USE_PARTITION_DFT);
@@ -61,14 +68,21 @@ static MYSQL_SYSVAR_INT(bulk_insert_size, sdb_bulk_insert_size,
                         PLUGIN_VAR_OPCMDARG, "bulk insert size", NULL,
                         sdb_bulk_insert_size_update,
                         SDB_DEFAULT_BULK_INSERT_SIZE, 1, 100000, 0);
+static MYSQL_SYSVAR_BOOL(use_autocommit, sdb_use_autocommit,
+                         PLUGIN_VAR_OPCMDARG,
+                         "enable autocommit of sequoiadb storage engine", NULL,
+                         sdb_use_autocommit_update, SDB_DEFAULT_USE_AUTOCOMMIT);
 static MYSQL_SYSVAR_BOOL(debug_log, sdb_debug_log, PLUGIN_VAR_OPCMDARG,
                          "turn on debug log of sequoiadb storage engine", NULL,
                          sdb_debug_log_update, SDB_DEBUG_LOG_DFT);
 
-struct st_mysql_sys_var *sdb_sys_vars[] = {
-    MYSQL_SYSVAR(conn_addr),       MYSQL_SYSVAR(use_partition),
-    MYSQL_SYSVAR(use_bulk_insert), MYSQL_SYSVAR(bulk_insert_size),
-    MYSQL_SYSVAR(debug_log),       NULL};
+struct st_mysql_sys_var *sdb_sys_vars[] = {MYSQL_SYSVAR(conn_addr),
+                                           MYSQL_SYSVAR(use_partition),
+                                           MYSQL_SYSVAR(use_bulk_insert),
+                                           MYSQL_SYSVAR(bulk_insert_size),
+                                           MYSQL_SYSVAR(use_autocommit),
+                                           MYSQL_SYSVAR(debug_log),
+                                           NULL};
 
 Sdb_conn_addrs::Sdb_conn_addrs() : conn_num(0) {
   for (int i = 0; i < SDB_COORD_NUM_MAX; i++) {

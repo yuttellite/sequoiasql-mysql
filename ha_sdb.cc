@@ -1267,7 +1267,7 @@ int ha_sdb::start_statement(THD *thd, uint table_count) {
       }
     } else {
       // autocommit
-      if (!conn->is_transaction_on()) {
+      if (sdb_use_autocommit && !conn->is_transaction_on()) {
         rc = conn->begin_transaction();
         if (rc != 0) {
           goto error;
