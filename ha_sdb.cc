@@ -317,15 +317,15 @@ int ha_sdb::field_to_obj(Field *field, bson::BSONObjBuilder &obj_builder) {
     case MYSQL_TYPE_BIT:
     case MYSQL_TYPE_TINY:
     case MYSQL_TYPE_SHORT:
-    case MYSQL_TYPE_INT24: {
+    case MYSQL_TYPE_INT24:
+    case MYSQL_TYPE_YEAR: {
       // overflow is impossible, store as INT32
       DBUG_ASSERT(field->val_int() <= INT_MAX32 ||
                   field->val_int() >= INT_MIN32);
       obj_builder.append(field->field_name, (int)field->val_int());
       break;
     }
-    case MYSQL_TYPE_LONG:
-    case MYSQL_TYPE_YEAR: {
+    case MYSQL_TYPE_LONG: {
       longlong value = field->val_int();
       if (value > INT_MAX32 || value < INT_MIN32) {
         // overflow, so store as INT64
