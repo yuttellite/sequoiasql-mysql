@@ -312,7 +312,6 @@ int ha_sdb::field_to_obj(Field *field, bson::BSONObjBuilder &obj_builder) {
 
   DBUG_ASSERT(NULL != field);
 
-  // TODO: process the quotes
   switch (field->type()) {
     case MYSQL_TYPE_BIT:
     case MYSQL_TYPE_TINY:
@@ -1747,33 +1746,21 @@ error:
 
 int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
   int rc = 0;
-  sdbCollectionSpace cs;
-  uint str_field_len = 0;
   Sdb_conn *conn = NULL;
   Sdb_cl cl;
   bson::BSONObj options;
-  bson::BSONObj comments;
-  my_bool use_partition = sdb_use_partition;
 
-  for (Field **field = form->field; *field; field++) {
-    if ((*field)->key_length() > str_field_len &&
-        ((*field)->type() == MYSQL_TYPE_VARCHAR ||
-         (*field)->type() == MYSQL_TYPE_STRING ||
-         (*field)->type() == MYSQL_TYPE_VAR_STRING ||
-         (*field)->type() == MYSQL_TYPE_BLOB ||
-         (*field)->type() == MYSQL_TYPE_TINY_BLOB ||
-         (*field)->type() == MYSQL_TYPE_MEDIUM_BLOB ||
-         (*field)->type() == MYSQL_TYPE_LONG_BLOB)) {
-      str_field_len = (*field)->key_length();
-      if (str_field_len >= SDB_FIELD_MAX_LEN) {
-        SDB_PRINT_ERROR(ER_TOO_BIG_FIELDLENGTH, ER(ER_TOO_BIG_FIELDLENGTH),
-                        (*field)->field_name,
-                        static_cast<ulong>(SDB_FIELD_MAX_LEN - 1));
-        rc = -1;
-        goto error;
-      }
+  for (Field **fields = form->field; *fields; fields++) {
+    Field *field = *fields;
+
+    if (field->key_length() >= SDB_FIELD_MAX_LEN) {
+      SDB_PRINT_ERROR(ER_TOO_BIG_FIELDLENGTH, ER(ER_TOO_BIG_FIELDLENGTH),
+                      field->field_name, static_cast<ulong>(SDB_FIELD_MAX_LEN));
+      rc = ER_TOO_BIG_FIELDLENGTH;
+      goto error;
     }
-    if (Field::NEXT_NUMBER == (*field)->unireg_check) {
+
+    if (Field::NEXT_NUMBER == field->unireg_check) {
       // TODO: support auto-increment field.
       //      it is auto-increment field if run here.
       //      the start-value is create_info->auto_increment_value
@@ -1786,7 +1773,7 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
     goto error;
   }
 
-  rc = get_cl_options(form, create_info, options, use_partition);
+  rc = get_cl_options(form, create_info, options, sdb_use_partition);
   if (0 != rc) {
     goto error;
   }
