@@ -312,22 +312,32 @@ int ha_sdb::field_to_obj(Field *field, bson::BSONObjBuilder &obj_builder) {
 
   DBUG_ASSERT(NULL != field);
 
-  // TODO: process the quotes
   switch (field->type()) {
-    case MYSQL_TYPE_SHORT:
-    case MYSQL_TYPE_LONG:
+    case MYSQL_TYPE_BIT:
     case MYSQL_TYPE_TINY:
-    case MYSQL_TYPE_YEAR:
-    case MYSQL_TYPE_INT24: {
-      if (((Field_num *)field)->unsigned_flag) {
-        obj_builder.append(field->field_name, (long long)(field->val_int()));
+    case MYSQL_TYPE_SHORT:
+    case MYSQL_TYPE_INT24:
+    case MYSQL_TYPE_YEAR: {
+      // overflow is impossible, store as INT32
+      DBUG_ASSERT(field->val_int() <= INT_MAX32 ||
+                  field->val_int() >= INT_MIN32);
+      obj_builder.append(field->field_name, (int)field->val_int());
+      break;
+    }
+    case MYSQL_TYPE_LONG: {
+      longlong value = field->val_int();
+      if (value > INT_MAX32 || value < INT_MIN32) {
+        // overflow, so store as INT64
+        obj_builder.append(field->field_name, (long long)value);
       } else {
-        obj_builder.append(field->field_name, (int)field->val_int());
+        obj_builder.append(field->field_name, (int)value);
       }
       break;
     }
     case MYSQL_TYPE_LONGLONG: {
-      if (((Field_num *)field)->unsigned_flag) {
+      longlong value = field->val_int();
+      if (value < 0 && ((Field_num *)field)->unsigned_flag) {
+        // overflow, so store as DECIMAL
         my_decimal tmp_val;
         char buff[MAX_FIELD_WIDTH];
         String str(buff, sizeof(buff), field->charset());
@@ -335,7 +345,7 @@ int ha_sdb::field_to_obj(Field *field, bson::BSONObjBuilder &obj_builder) {
         my_decimal2string(E_DEC_FATAL_ERROR, &tmp_val, 0, 0, 0, &str);
         obj_builder.appendDecimal(field->field_name, str.c_ptr());
       } else {
-        obj_builder.append(field->field_name, field->val_int());
+        obj_builder.append(field->field_name, (long long)value);
       }
       break;
     }
@@ -352,15 +362,14 @@ int ha_sdb::field_to_obj(Field *field, bson::BSONObjBuilder &obj_builder) {
     case MYSQL_TYPE_MEDIUM_BLOB:
     case MYSQL_TYPE_LONG_BLOB:
     case MYSQL_TYPE_BLOB: {
-      Field_str *f = (Field_str *)field;
-      String *str;
       String val_tmp;
-      field->val_str(&val_tmp, &val_tmp);
-      if (f->binary()) {
+      field->val_str(&val_tmp);
+      if (((Field_str *)field)->binary()) {
         obj_builder.appendBinData(field->field_name, val_tmp.length(),
                                   bson::BinDataGeneral, val_tmp.ptr());
       } else {
-        str = &val_tmp;
+        String conv_str;
+        String *str = &val_tmp;
         if (!my_charset_same(str->charset(), &SDB_CHARSET)) {
           rc = sdb_convert_charset(*str, conv_str, &SDB_CHARSET);
           if (rc) {
@@ -419,27 +428,29 @@ int ha_sdb::field_to_obj(Field *field, bson::BSONObjBuilder &obj_builder) {
                                   tm.tv_usec);
       break;
     }
-
-      /*case MYSQL_TYPE_TIMESTAMP2:
-      {
-        Field_timestampf *f = (Field_timestampf *)(*field) ;
-        struct timeval tm ;
-        f->get_timestamp( &tm, NULL ) ;
-        obj_builder.appendTimestamp( (*field)->field_name,
-                                      tm.tv_sec*1000,
-                                      tm.tv_usec ) ;
-        break ;
-      }*/
-
     case MYSQL_TYPE_NULL:
       // skip the null value
       break;
     case MYSQL_TYPE_DATETIME: {
       char buff[MAX_FIELD_WIDTH];
       String str(buff, sizeof(buff), field->charset());
-      String unused;
-      field->val_str(&str, &unused);
+      field->val_str(&str);
       obj_builder.append(field->field_name, str.c_ptr());
+      break;
+    }
+    case MYSQL_TYPE_JSON: {
+      String val_tmp, conv_str;
+      field->val_str(&val_tmp);
+      String *str = &val_tmp;
+      if (!my_charset_same(str->charset(), &SDB_CHARSET)) {
+        rc = sdb_convert_charset(*str, conv_str, &SDB_CHARSET);
+        if (rc) {
+          goto error;
+        }
+        str = &conv_str;
+      }
+      obj_builder.appendStrWithNoTerminating(field->field_name, str->ptr(),
+                                             str->length());
       break;
     }
     default: {
@@ -927,17 +938,8 @@ int ha_sdb::obj_to_row(bson::BSONObj &obj, uchar *buf) {
       }
       // datetime is stored as string
       case bson::String: {
-        String org_str(befield.valuestr(), befield.valuestrsize() - 1,
-                       &SDB_CHARSET);
-        String *str = &org_str;
-        if (!my_charset_same((*field)->charset(), &SDB_CHARSET)) {
-          rc = sdb_convert_charset(org_str, conv_str, (*field)->charset());
-          if (rc) {
-            goto error;
-          }
-          str = &conv_str;
-        }
-        (*field)->store(str->ptr(), str->length(), &my_charset_bin);
+        (*field)->store(befield.valuestr(), befield.valuestrsize() - 1,
+                        &SDB_CHARSET);
         break;
       }
       case bson::NumberDecimal: {
@@ -1744,33 +1746,21 @@ error:
 
 int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
   int rc = 0;
-  sdbCollectionSpace cs;
-  uint str_field_len = 0;
   Sdb_conn *conn = NULL;
   Sdb_cl cl;
   bson::BSONObj options;
-  bson::BSONObj comments;
-  my_bool use_partition = sdb_use_partition;
 
-  for (Field **field = form->field; *field; field++) {
-    if ((*field)->key_length() > str_field_len &&
-        ((*field)->type() == MYSQL_TYPE_VARCHAR ||
-         (*field)->type() == MYSQL_TYPE_STRING ||
-         (*field)->type() == MYSQL_TYPE_VAR_STRING ||
-         (*field)->type() == MYSQL_TYPE_BLOB ||
-         (*field)->type() == MYSQL_TYPE_TINY_BLOB ||
-         (*field)->type() == MYSQL_TYPE_MEDIUM_BLOB ||
-         (*field)->type() == MYSQL_TYPE_LONG_BLOB)) {
-      str_field_len = (*field)->key_length();
-      if (str_field_len >= SDB_FIELD_MAX_LEN) {
-        SDB_PRINT_ERROR(ER_TOO_BIG_FIELDLENGTH, ER(ER_TOO_BIG_FIELDLENGTH),
-                        (*field)->field_name,
-                        static_cast<ulong>(SDB_FIELD_MAX_LEN - 1));
-        rc = -1;
-        goto error;
-      }
+  for (Field **fields = form->field; *fields; fields++) {
+    Field *field = *fields;
+
+    if (field->key_length() >= SDB_FIELD_MAX_LEN) {
+      SDB_PRINT_ERROR(ER_TOO_BIG_FIELDLENGTH, ER(ER_TOO_BIG_FIELDLENGTH),
+                      field->field_name, static_cast<ulong>(SDB_FIELD_MAX_LEN));
+      rc = ER_TOO_BIG_FIELDLENGTH;
+      goto error;
     }
-    if (Field::NEXT_NUMBER == (*field)->unireg_check) {
+
+    if (Field::NEXT_NUMBER == field->unireg_check) {
       // TODO: support auto-increment field.
       //      it is auto-increment field if run here.
       //      the start-value is create_info->auto_increment_value
@@ -1783,7 +1773,7 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
     goto error;
   }
 
-  rc = get_cl_options(form, create_info, options, use_partition);
+  rc = get_cl_options(form, create_info, options, sdb_use_partition);
   if (0 != rc) {
     goto error;
   }
