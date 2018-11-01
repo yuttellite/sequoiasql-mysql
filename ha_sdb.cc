@@ -72,7 +72,6 @@ handlerton *sdb_hton = NULL;
 
 mysql_mutex_t sdb_mutex;
 static PSI_mutex_key key_mutex_sdb, key_mutex_SDB_SHARE_mutex;
-bson::BSONObj empty_obj;
 static HASH sdb_open_tables;
 static PSI_memory_key key_memory_sdb_share;
 static PSI_memory_key sdb_key_memory_blobroot;
@@ -643,7 +642,7 @@ int ha_sdb::update_row(const uchar *old_data, uchar *new_data) {
     rule_obj = BSON("$set" << new_obj << "$unset" << null_obj);
   }
 
-  rc = collection->update(rule_obj, cur_rec, sdbclient::_sdbStaticObject,
+  rc = collection->update(rule_obj, cur_rec, SDB_EMPTY_BSON,
                           UPDATE_KEEP_SHARDINGKEY);
   if (rc != 0) {
     if (SDB_IXM_DUP_KEY == get_sdb_code(rc)) {
@@ -724,7 +723,7 @@ int ha_sdb::index_last(uchar *buf) {
     goto error;
   }
 done:
-  condition = empty_obj;
+  condition = SDB_EMPTY_BSON;
   return rc;
 error:
   goto done;
@@ -737,7 +736,7 @@ int ha_sdb::index_first(uchar *buf) {
     goto error;
   }
 done:
-  condition = empty_obj;
+  condition = SDB_EMPTY_BSON;
   return rc;
 error:
   goto done;
@@ -774,7 +773,7 @@ int ha_sdb::index_read_map(uchar *buf, const uchar *key_ptr,
     goto error;
   }
 done:
-  condition = empty_obj;
+  condition = SDB_EMPTY_BSON;
   return rc;
 error:
   goto done;
@@ -801,8 +800,7 @@ int ha_sdb::index_read_one(bson::BSONObj condition, int order_direction,
     goto error;
   }
 
-  rc =
-      collection->query(condition, sdbclient::_sdbStaticObject, order_by, hint);
+  rc = collection->query(condition, SDB_EMPTY_BSON, order_by, hint);
   if (rc) {
     SDB_LOG_ERROR(
         "Collection[%s.%s] failed to query with "
@@ -841,7 +839,7 @@ error:
 int ha_sdb::index_init(uint idx, bool sorted) {
   active_index = idx;
   if (!pushed_cond) {
-    condition = empty_obj;
+    condition = SDB_EMPTY_BSON;
   }
   free_root(&blobroot, MYF(0));
   return 0;
@@ -868,7 +866,7 @@ double ha_sdb::read_time(uint index, uint ranges, ha_rows rows) {
 int ha_sdb::rnd_init(bool scan) {
   first_read = true;
   if (!pushed_cond) {
-    condition = empty_obj;
+    condition = SDB_EMPTY_BSON;
   }
   free_root(&blobroot, MYF(0));
   return 0;
@@ -1076,7 +1074,7 @@ int ha_sdb::rnd_next(uchar *buf) {
 
   if (first_read) {
     rc = collection->query(condition);
-    condition = empty_obj;
+    condition = SDB_EMPTY_BSON;
     if (rc != 0) {
       goto error;
     }
@@ -1879,7 +1877,7 @@ const Item *ha_sdb::cond_push(const Item *cond) {
           "Condition can't be pushed down. "
           "db=[unknown], sql=[unknown]");
     }
-    condition = sdbclient::_sdbStaticObject;
+    condition = SDB_EMPTY_BSON;
   }
 done:
   return remain_cond;

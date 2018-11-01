@@ -18,15 +18,13 @@
 #endif
 
 #include "sdb_idx.h"
+#include <bson/bson.hpp>
 #include "sdb_cl.h"
 #include "sdb_errcode.h"
 #include "sdb_def.h"
 #include "sdb_log.h"
 #include "sdb_util.h"
 #include "sql_table.h"
-#include "bson/bsonDecimal.h"
-
-static bson::BSONObj empty_obj;
 
 #define mi_sint2korr(A)                   \
   ((int16)(((int16)(((uchar *)(A))[1])) + \
@@ -785,13 +783,13 @@ int build_match_obj_by_key_parts(uint keynr, const uchar *key_ptr,
         start_key_array_builder.append(
             BSON(key_part_temp->field->field_name << start_key_obj));
         start_key_array_empty = false;
-        start_key_obj = empty_obj;
+        start_key_obj = SDB_EMPTY_BSON;
       }
       if (!end_key_obj.isEmpty()) {
         end_key_array_builder.append(
             BSON(key_part_temp->field->field_name << end_key_obj));
         end_key_array_empty = false;
-        end_key_obj = empty_obj;
+        end_key_obj = SDB_EMPTY_BSON;
       }
 
       start_key_ptr_tmp += key_part_temp->store_length;
@@ -817,13 +815,13 @@ int build_match_obj_by_key_parts(uint keynr, const uchar *key_ptr,
         start_key_array_builder.append(
             BSON(key_part_temp->field->field_name << start_key_obj));
         start_key_array_empty = false;
-        start_key_obj = empty_obj;
+        start_key_obj = SDB_EMPTY_BSON;
       }
       if (!end_key_obj.isEmpty()) {
         end_key_array_builder.append(
             BSON(key_part_temp->field->field_name << end_key_obj));
         end_key_array_empty = false;
-        end_key_obj = empty_obj;
+        end_key_obj = SDB_EMPTY_BSON;
       }
     }
 
