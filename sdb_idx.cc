@@ -18,6 +18,7 @@
 #endif
 
 #include "sdb_idx.h"
+#include <myisampack.h>
 #include <bson/bson.hpp>
 #include "sdb_cl.h"
 #include "sdb_errcode.h"
@@ -25,25 +26,6 @@
 #include "sdb_log.h"
 #include "sdb_util.h"
 #include "sql_table.h"
-
-#define mi_sint2korr(A)                   \
-  ((int16)(((int16)(((uchar *)(A))[1])) + \
-           ((int16)((int16)((char *)(A))[0]) << 8)))
-#define mi_sint3korr(A)                                                        \
-  ((int32)(((((uchar *)(A))[0]) & 128)                                         \
-               ? (((uint32)255L << 24) | (((uint32)((uchar *)(A))[0]) << 16) | \
-                  (((uint32)((uchar *)(A))[1]) << 8) |                         \
-                  ((uint32)((uchar *)(A))[2]))                                 \
-               : (((uint32)((uchar *)(A))[0]) << 16) |                         \
-                     (((uint32)((uchar *)(A))[1]) << 8) |                      \
-                     ((uint32)((uchar *)(A))[2])))
-
-#define mi_uint5korr(A)                                 \
-  ((ulonglong)(((uint32)(((uchar *)(A))[4])) +          \
-               (((uint32)(((uchar *)(A))[3])) << 8) +   \
-               (((uint32)(((uchar *)(A))[2])) << 16) +  \
-               (((uint32)(((uchar *)(A))[1])) << 24)) + \
-   (((ulonglong)(((uchar *)(A))[0])) << 32))
 
 #define DATETIMEF_INT_OFS 0x8000000000LL
 
