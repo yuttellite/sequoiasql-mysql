@@ -22,8 +22,6 @@
 
 int sdb_create_index(const KEY *keyInfo, Sdb_cl &cl);
 
-const char *sdb_get_idx_name(KEY *key_info);
-
 int sdb_get_idx_order(KEY *key_info, bson::BSONObj &order, int order_direction);
 
 int build_match_obj_by_start_stop_key(uint keynr, const uchar *key_ptr,

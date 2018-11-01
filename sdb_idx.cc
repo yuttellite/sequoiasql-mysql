@@ -175,13 +175,6 @@ error:
   goto done;
 }
 
-const char *sdb_get_idx_name(KEY *key_info) {
-  if (key_info) {
-    return key_info->name;
-  }
-  return NULL;
-}
-
 int sdb_get_idx_order(KEY *key_info, bson::BSONObj &order,
                       int order_direction) {
   int rc = SDB_ERR_OK;

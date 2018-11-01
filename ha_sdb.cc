@@ -785,24 +785,17 @@ int ha_sdb::index_read_one(bson::BSONObj condition, int order_direction,
   int rc = 0;
   bson::BSONObj hint;
   bson::BSONObj order_by;
-  KEY *idx_key = NULL;
-  const char *idx_name = NULL;
+  KEY *key_info = table->key_info + active_index;
 
   DBUG_ASSERT(NULL != collection);
   DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
+  DBUG_ASSERT(NULL != key_info);
+  DBUG_ASSERT(NULL != key_info->name);
 
-  idx_key = table->key_info + active_index;
-  idx_name = sdb_get_idx_name(idx_key);
-  if (idx_name) {
-    hint = BSON("" << idx_name);
-  } else {
-    SDB_LOG_ERROR("Index name not found.");
-    rc = SDB_ERR_INVALID_ARG;
-    goto error;
-  }
+  hint = BSON("" << key_info->name);
 
   idx_order_direction = order_direction;
-  rc = sdb_get_idx_order(idx_key, order_by, order_direction);
+  rc = sdb_get_idx_order(key_info, order_by, order_direction);
   if (rc) {
     SDB_LOG_ERROR("Fail to get index order. rc: %d", rc);
     goto error;
