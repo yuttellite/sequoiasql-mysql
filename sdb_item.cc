@@ -17,11 +17,64 @@
 #define MYSQL_SERVER
 #endif
 
+#include <sql_time.h>
 #include <my_dbug.h>
 #include "sdb_item.h"
 #include "sdb_errcode.h"
 #include "sdb_util.h"
 #include "sdb_def.h"
+
+#define BSON_APPEND(field_name, value, obj, arr_builder) \
+  do {                                                   \
+    if (NULL == (arr_builder)) {                         \
+      (obj) = BSON((field_name) << (value));             \
+    } else {                                             \
+      (arr_builder)->append(value);                      \
+    }                                                    \
+  } while (0)
+
+// This function is similar to Item::get_date_from_string() but without warning.
+static bool get_date_from_item_string(Item *item, MYSQL_TIME *ltime,
+                                      my_time_flags_t flags) {
+  char buff[MAX_DATE_STRING_REP_LENGTH];
+  MYSQL_TIME_STATUS status;
+  THD *thd = current_thd;
+  String tmp(buff, sizeof(buff), &my_charset_bin), *res;
+
+  DBUG_ASSERT(NULL != item);
+  DBUG_ASSERT(NULL != ltime);
+
+  if (!(res = item->val_str(&tmp))) {
+    set_zero_time(ltime, MYSQL_TIMESTAMP_DATETIME);
+    return true;
+  }
+
+  if (thd->variables.sql_mode & MODE_NO_ZERO_DATE) {
+    flags |= TIME_NO_ZERO_DATE;
+  }
+  if (thd->variables.sql_mode & MODE_INVALID_DATES) {
+    flags |= TIME_INVALID_DATES;
+  }
+
+  return str_to_datetime(res, ltime, flags, &status);
+}
+
+// This function is similar to Item::get_time_from_string() but without warning.
+static bool get_time_from_item_string(Item *item, MYSQL_TIME *ltime) {
+  char buff[MAX_DATE_STRING_REP_LENGTH];
+  MYSQL_TIME_STATUS status;
+  String tmp(buff, sizeof(buff), &my_charset_bin), *res;
+
+  DBUG_ASSERT(NULL != item);
+  DBUG_ASSERT(NULL != ltime);
+
+  if (!(res = item->val_str(&tmp))) {
+    set_zero_time(ltime, MYSQL_TIMESTAMP_TIME);
+    return true;
+  }
+
+  return str_to_time(res, ltime, 0, &status);
+}
 
 int Sdb_logic_item::push(Sdb_item *cond_item) {
   int rc = 0;
@@ -189,82 +242,64 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
   switch (field->type()) {
     case MYSQL_TYPE_TINY:
     case MYSQL_TYPE_SHORT:
-    case MYSQL_TYPE_LONG:
     case MYSQL_TYPE_INT24:
+    case MYSQL_TYPE_LONG:
     case MYSQL_TYPE_LONGLONG:
     case MYSQL_TYPE_FLOAT:
     case MYSQL_TYPE_DOUBLE:
     case MYSQL_TYPE_DECIMAL:
     case MYSQL_TYPE_NEWDECIMAL: {
-      if (item_val->result_type() == INT_RESULT) {
-        longlong val_tmp = 0;
-        if (item_val->unsigned_flag) {
-          val_tmp = item_val->val_uint();
-          if (val_tmp < 0) {
-            if (NULL == arr_builder) {
-              bson::BSONObjBuilder obj_builder;
-              my_decimal dec_tmp;
-              String str(buff, sizeof(buff), item_val->charset_for_protocol());
-              item_val->val_decimal(&dec_tmp);
-              my_decimal2string(E_DEC_FATAL_ERROR, &dec_tmp, 0, 0, 0, &str);
-              obj_builder.appendDecimal(field_name, str.c_ptr());
-              obj = obj_builder.obj();
-              break;
-            }
-            rc = SDB_ERR_OVF;
-            goto error;
-          }
-        } else {
-          val_tmp = item_val->val_int();
-        }
-        if (NULL == arr_builder) {
-          obj = BSON(field_name << val_tmp);
-        } else {
-          arr_builder->append(val_tmp);
-        }
-      } else if (item_val->result_type() == REAL_RESULT) {
-        if (NULL == arr_builder) {
-          obj = BSON(field_name << item_val->val_real());
-        } else {
-          arr_builder->append(item_val->val_real());
-        }
-      } else if (item_val->result_type() == DECIMAL_RESULT ||
-                 item_val->result_type() == STRING_RESULT) {
-        String str(buff, sizeof(buff), item_val->charset_for_protocol());
-        String *pStr;
-        pStr = item_val->val_str(&str);
-        if (NULL == pStr) {
-          rc = SDB_ERR_INVALID_ARG;
-          goto error;
-        }
-        String conv_str;
-        if (!my_charset_same(pStr->charset(), &SDB_CHARSET)) {
-          rc = sdb_convert_charset(*pStr, conv_str, &SDB_CHARSET);
-          if (rc) {
-            break;
-          }
-          pStr = &conv_str;
-        }
+      switch (item_val->result_type()) {
+        case INT_RESULT: {
+          longlong val_tmp = item_val->val_int();
+          if (val_tmp < 0 && item_val->unsigned_flag) {
+            bson::bsonDecimal decimal;
+            my_decimal dec_tmp;
+            String str(buff, sizeof(buff), item_val->charset_for_protocol());
+            item_val->val_decimal(&dec_tmp);
+            my_decimal2string(E_DEC_FATAL_ERROR, &dec_tmp, 0, 0, 0, &str);
 
-        if (NULL == arr_builder) {
-          bson::BSONObjBuilder obj_builder;
-          if (!obj_builder.appendDecimal(field_name, pStr->c_ptr())) {
-            rc = SDB_ERR_INVALID_ARG;
-            goto error;
+            rc = decimal.fromString(str.c_ptr());
+            if (0 != rc) {
+              rc = SDB_ERR_INVALID_ARG;
+              goto error;
+            }
+
+            BSON_APPEND(field_name, decimal, obj, arr_builder);
+          } else {
+            BSON_APPEND(field_name, val_tmp, obj, arr_builder);
           }
-          obj = obj_builder.obj();
-        } else {
-          bson::bsonDecimal decimal;
-          if (item_val->result_type() == STRING_RESULT) {
-            // TODO:SEQUOIADBMAINSTREAM-3365
-            //     the string value is not support for "in"
+          break;
+        }
+        case REAL_RESULT: {
+          BSON_APPEND(field_name, item_val->val_real(), obj, arr_builder);
+          break;
+        }
+        case STRING_RESULT: {
+          if (NULL != arr_builder) {
+            // SEQUOIADBMAINSTREAM-3365
+            // the string value is not support for "in"
             rc = SDB_ERR_TYPE_UNSUPPORTED;
             goto error;
           }
-          rc = decimal.init();
-          if (0 != rc) {
-            rc = SDB_ERR_OOM;
+          // pass through
+        }
+        case DECIMAL_RESULT: {
+          bson::bsonDecimal decimal;
+          String str(buff, sizeof(buff), item_val->charset_for_protocol());
+          String conv_str;
+          String *pStr;
+          pStr = item_val->val_str(&str);
+          if (NULL == pStr) {
+            rc = SDB_ERR_INVALID_ARG;
             goto error;
+          }
+          if (!my_charset_same(pStr->charset(), &SDB_CHARSET)) {
+            rc = sdb_convert_charset(*pStr, conv_str, &SDB_CHARSET);
+            if (rc) {
+              goto error;
+            }
+            pStr = &conv_str;
           }
 
           rc = decimal.fromString(pStr->c_ptr());
@@ -272,11 +307,14 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
             rc = SDB_ERR_INVALID_ARG;
             goto error;
           }
-          arr_builder->append(decimal);
+
+          BSON_APPEND(field_name, decimal, obj, arr_builder);
+          break;
         }
-      } else {
-        rc = SDB_ERR_COND_UNEXPECTED_ITEM;
-        goto error;
+        default: {
+          rc = SDB_ERR_COND_UNEXPECTED_ITEM;
+          goto error;
+        }
       }
       break;
     }
@@ -349,7 +387,7 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
     case MYSQL_TYPE_DATE: {
       MYSQL_TIME ltime;
       if (STRING_RESULT == item_val->result_type() &&
-          !item_val->get_date(&ltime, TIME_FUZZY_DATE)) {
+          !get_date_from_item_string(item_val, &ltime, TIME_FUZZY_DATE)) {
         struct tm tm_val;
         tm_val.tm_sec = ltime.second;
         tm_val.tm_min = ltime.minute;
@@ -362,25 +400,19 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
         tm_val.tm_isdst = 0;
         time_t time_tmp = mktime(&tm_val);
         bson::Date_t dt((longlong)(time_tmp * 1000));
-        if (NULL == arr_builder) {
-          bson::BSONObjBuilder obj_builder;
-          obj_builder.appendDate(field_name, dt);
-          obj = obj_builder.obj();
-        } else {
-          rc = SDB_ERR_TYPE_UNSUPPORTED;
-        }
-        break;
+        BSON_APPEND(field_name, dt, obj, arr_builder);
+      } else {
+        rc = SDB_ERR_COND_UNEXPECTED_ITEM;
+        goto error;
       }
-      rc = SDB_ERR_COND_UNEXPECTED_ITEM;
-      goto error;
+      break;
     }
 
-    case MYSQL_TYPE_TIMESTAMP:
-    case MYSQL_TYPE_TIMESTAMP2: {
+    case MYSQL_TYPE_TIMESTAMP: {
       MYSQL_TIME ltime;
       if (item_val->result_type() != STRING_RESULT ||
-          item_val->get_date(&ltime, TIME_FUZZY_DATE) || ltime.year > 2037 ||
-          ltime.year < 1902) {
+          get_date_from_item_string(item_val, &ltime, TIME_FUZZY_DATE) ||
+          ltime.year > 2037 || ltime.year < 1902) {
         rc = SDB_ERR_COND_UNEXPECTED_ITEM;
         goto error;
       } else {
@@ -405,15 +437,15 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
         } else {
           arr_builder->appendTimestamp(time_val_tmp);
         }
-        break;
       }
+      break;
     }
 
     case MYSQL_TYPE_DATETIME: {
       MYSQL_TIME ltime;
       if (item_val->result_type() != STRING_RESULT ||
-          item_val->get_date(&ltime, TIME_FUZZY_DATE) || ltime.year > 9999 ||
-          ltime.year < 1000) {
+          get_date_from_item_string(item_val, &ltime, TIME_FUZZY_DATE) ||
+          ltime.year > 9999 || ltime.year < 1000) {
         rc = SDB_ERR_COND_UNEXPECTED_ITEM;
         goto error;
       } else {
@@ -426,20 +458,47 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
           len += sprintf(buff + len, ".%0*lu", (int)dec, ltime.second_part);
         }
 
-        if (NULL == arr_builder) {
-          obj = BSON(field_name << buff);
-        } else {
-          arr_builder->append(buff);
-        }
+        BSON_APPEND(field_name, buff, obj, arr_builder);
       }
       break;
     }
 
-    case MYSQL_TYPE_TIME:
-    case MYSQL_TYPE_YEAR:
-    case MYSQL_TYPE_NEWDATE:
-    case MYSQL_TYPE_DATETIME2:
-    case MYSQL_TYPE_TIME2:
+    case MYSQL_TYPE_TIME: {
+      MYSQL_TIME ltime;
+      if (STRING_RESULT == item_val->result_type() &&
+          !get_time_from_item_string(item_val, &ltime)) {
+        double time = ltime.hour;
+        time = time * 100 + ltime.minute;
+        time = time * 100 + ltime.second;
+        if (ltime.second_part) {
+          double ms = ltime.second_part;
+          while (ms >= 1.0) {
+            ms /= 10;
+          }
+          time += ms;
+        }
+        if (ltime.neg) {
+          time = -time;
+        }
+
+        BSON_APPEND(field_name, time, obj, arr_builder);
+      } else {
+        rc = SDB_ERR_COND_UNEXPECTED_ITEM;
+        goto error;
+      }
+      break;
+    }
+
+    case MYSQL_TYPE_YEAR: {
+      if (INT_RESULT == item_val->result_type()) {
+        longlong value = item_val->val_int();
+        BSON_APPEND(field_name, value, obj, arr_builder);
+      } else {
+        rc = SDB_ERR_COND_UNEXPECTED_ITEM;
+        goto error;
+      }
+      break;
+    }
 
     case MYSQL_TYPE_NULL:
     case MYSQL_TYPE_BIT:
