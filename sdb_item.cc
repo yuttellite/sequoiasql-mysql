@@ -500,8 +500,18 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
       break;
     }
 
+    case MYSQL_TYPE_BIT: {
+      if (INT_RESULT == item_val->result_type()) {
+        longlong value = item_val->val_int();
+        BSON_APPEND(field_name, value, obj, arr_builder);
+      } else {
+        rc = SDB_ERR_COND_UNEXPECTED_ITEM;
+        goto error;
+      }
+      break;
+    }
+
     case MYSQL_TYPE_NULL:
-    case MYSQL_TYPE_BIT:
     case MYSQL_TYPE_JSON:
     case MYSQL_TYPE_ENUM:
     case MYSQL_TYPE_SET:
