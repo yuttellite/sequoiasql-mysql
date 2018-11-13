@@ -893,110 +893,100 @@ int ha_sdb::obj_to_row(bson::BSONObj &obj, uchar *buf) {
   /* Avoid asserts in ::store() for columns that are not going to be updated */
   org_bitmap = dbug_tmp_use_all_columns(table, table->write_set);
 
-  for (Field **field = table->field; *field; field++) {
-    if (!bitmap_is_set(table->read_set, (*field)->field_index) && !read_all) {
+  for (Field **fields = table->field; *fields; fields++) {
+    Field *field = *fields;
+
+    if (!bitmap_is_set(table->read_set, field->field_index) && !read_all) {
       continue;
     }
 
-    (*field)->reset();
-    bson::BSONElement befield;
-    befield = obj.getField((*field)->field_name);
-    if (befield.eoo() || befield.isNull()) {
-      (*field)->set_null();
+    field->reset();
+
+    bson::BSONElement elem;
+    elem = obj.getField(field->field_name);
+    if (elem.eoo() || elem.isNull() || bson::Undefined == elem.type()) {
+      field->set_null();
       continue;
     }
 
-    switch (befield.type()) {
+    switch (elem.type()) {
       case bson::NumberInt:
       case bson::NumberLong: {
-        longlong nr = befield.numberLong();
-        (*field)->store(nr, false);
+        longlong nr = elem.numberLong();
+        field->store(nr, false);
         break;
       }
       case bson::NumberDouble: {
-        double nr = befield.numberDouble();
-        (*field)->store(nr);
+        double nr = elem.numberDouble();
+        field->store(nr);
         break;
       }
       case bson::BinData: {
         int lenTmp = 0;
-        const char *dataTmp = befield.binData(lenTmp);
+        const char *dataTmp = elem.binData(lenTmp);
         if (lenTmp < 0) {
           lenTmp = 0;
         }
-        (*field)->store(dataTmp, lenTmp, &my_charset_bin);
+        field->store(dataTmp, lenTmp, &my_charset_bin);
         break;
       }
       // datetime is stored as string
       case bson::String: {
-        (*field)->store(befield.valuestr(), befield.valuestrsize() - 1,
-                        &SDB_CHARSET);
+        field->store(elem.valuestr(), elem.valuestrsize() - 1, &SDB_CHARSET);
         break;
       }
       case bson::NumberDecimal: {
-        bson::bsonDecimal valTmp = befield.numberDecimal();
+        bson::bsonDecimal valTmp = elem.numberDecimal();
         string strValTmp = valTmp.toString();
-        (*field)->store(strValTmp.c_str(), strValTmp.length(), &my_charset_bin);
+        field->store(strValTmp.c_str(), strValTmp.length(), &my_charset_bin);
         break;
       }
-      case bson::Date:
-      case bson::Timestamp: {
-        longlong milTmp = 0;
-        longlong microTmp = 0;
+      case bson::Date: {
+        MYSQL_TIME time_val;
         struct timeval tv;
-        if (bson::Timestamp == befield.type()) {
-          milTmp = (longlong)(befield.timestampTime());
-          microTmp = befield.timestampInc();
+        struct tm tm_val;
+
+        longlong millisec = (longlong)(elem.date());
+        tv.tv_sec = millisec / 1000;
+        tv.tv_usec = millisec % 1000 * 1000;
+        localtime_r((const time_t *)(&tv.tv_sec), &tm_val);
+
+        time_val.year = tm_val.tm_year + 1900;
+        time_val.month = tm_val.tm_mon + 1;
+        time_val.day = tm_val.tm_mday;
+        time_val.hour = 0;
+        time_val.minute = 0;
+        time_val.second = 0;
+        time_val.second_part = 0;
+        time_val.neg = 0;
+        time_val.time_type = MYSQL_TIMESTAMP_DATE;
+        if ((time_val.month < 1 || time_val.day < 1) ||
+            (time_val.year > 9999 || time_val.month > 12 ||
+             time_val.day > 31)) {
+          // Invalid date, the field has been reset to zero,
+          // so no need to store.
         } else {
-          milTmp = (longlong)(befield.date());
+          field->store_time(&time_val, 0);
         }
-        tv.tv_sec = milTmp / 1000;
-        tv.tv_usec = milTmp % 1000 * 1000 + microTmp;
-        if (is_temporal_type_with_date_and_time((*field)->type())) {
-          Field_temporal_with_date_and_time *f =
-              (Field_temporal_with_date_and_time *)(*field);
-          f->store_timestamp(&tv);
-        } else if ((*field)->type() == MYSQL_TYPE_TIMESTAMP2) {
-          Field_temporal_with_date_and_timef *f =
-              (Field_temporal_with_date_and_timef *)(*field);
-          f->store_timestamp(&tv);
-        } else if (is_temporal_type_with_date((*field)->type())) {
-          MYSQL_TIME myTime;
-          struct tm tmTmp;
-          localtime_r((const time_t *)(&tv.tv_sec), &tmTmp);
-          myTime.year = tmTmp.tm_year + 1900;
-          myTime.month = tmTmp.tm_mon + 1;
-          myTime.day = tmTmp.tm_mday;
-          myTime.hour = tmTmp.tm_hour;
-          myTime.minute = tmTmp.tm_min;
-          myTime.second = tmTmp.tm_sec;
-          myTime.second_part = 0;
-          myTime.neg = 0;
-          myTime.time_type = MYSQL_TIMESTAMP_DATETIME;
-          Field_temporal_with_date *f = (Field_temporal_with_date *)(*field);
-          if ((myTime.month < 1 || myTime.day < 1) ||
-              (myTime.year > 9999 || myTime.month > 12 || myTime.day > 31)) {
-            myTime.year = 0;
-            myTime.month = 0;
-            myTime.day = 0;
-          }
-          f->store_time(&myTime, MYSQL_TIMESTAMP_TIME);
-        } else {
-          longlong nr = (longlong)(befield.timestampTime()) * 1000 +
-                        befield.timestampInc();
-          (*field)->store(nr, false);
-        }
+        break;
+      }
+      case bson::Timestamp: {
+        struct timeval tv;
+        longlong millisec = (longlong)(elem.timestampTime());
+        longlong microsec = elem.timestampInc();
+        tv.tv_sec = millisec / 1000;
+        tv.tv_usec = millisec % 1000 * 1000 + microsec;
+        field->store_timestamp(&tv);
         break;
       }
       case bson::Object:
       case bson::Bool:
       default:
-        (*field)->store("", 0, &my_charset_bin);
         rc = SDB_ERR_TYPE_UNSUPPORTED;
         goto error;
     }
-    if ((*field)->flags & BLOB_FLAG) {
-      Field_blob *blob = *(Field_blob **)field;
+    if (field->flags & BLOB_FLAG) {
+      Field_blob *blob = (Field_blob *)field;
       uchar *src, *dst;
       uint length, packlength;
 
