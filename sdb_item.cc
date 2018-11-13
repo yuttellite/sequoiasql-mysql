@@ -209,7 +209,6 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
                                 Field *field, bson::BSONObj &obj,
                                 bson::BSONArrayBuilder *arr_builder) {
   int rc = SDB_ERR_OK;
-  char buff[MAX_FIELD_WIDTH] = {0};
 
   if (NULL == item_val || !item_val->const_item() ||
       (Item::FUNC_ITEM == item_val->type() &&
@@ -255,6 +254,7 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
           if (val_tmp < 0 && item_val->unsigned_flag) {
             bson::bsonDecimal decimal;
             my_decimal dec_tmp;
+            char buff[MAX_FIELD_WIDTH] = {0};
             String str(buff, sizeof(buff), item_val->charset_for_protocol());
             item_val->val_decimal(&dec_tmp);
             my_decimal2string(E_DEC_FATAL_ERROR, &dec_tmp, 0, 0, 0, &str);
@@ -286,6 +286,7 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
         }
         case DECIMAL_RESULT: {
           bson::bsonDecimal decimal;
+          char buff[MAX_FIELD_WIDTH] = {0};
           String str(buff, sizeof(buff), item_val->charset_for_protocol());
           String conv_str;
           String *pStr;
@@ -322,51 +323,33 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
     case MYSQL_TYPE_VARCHAR:
     case MYSQL_TYPE_VAR_STRING:
     case MYSQL_TYPE_STRING:
-    case MYSQL_TYPE_TINY_BLOB:
-    case MYSQL_TYPE_MEDIUM_BLOB:
-    case MYSQL_TYPE_LONG_BLOB:
     case MYSQL_TYPE_BLOB: {
-      if (item_val->result_type() == STRING_RESULT) {
-        Field_str *f = (Field_str *)field;
-        if (f->binary()) {
-          rc = SDB_ERR_TYPE_UNSUPPORTED;
-          break;
-          /*if ( NULL == arr_builder )
-          {
-             bson::BSONObjBuilder obj_builder ;
-             obj_builder.appendBinData(field_name,
-                                       pStr->length(),
-                                       bson::BinDataGeneral,
-                                       pStr->c_ptr() ) ;
-             obj = obj_builder.obj() ;
-          }
-          else
-          {*/
-          // binary is not supported for array in sequoiadb.
-          /*
-          bson::BSONObj obj_tmp
-             = BSON( "$binary" << item_val->item_name.ptr()
-                     << "$type" << bson::BinDataGeneral ) ;
-          arr_builder->append( obj_tmp ) ;*/
-          /*rc = SDB_ERR_TYPE_UNSUPPORTED ;
-       }
-       break ;*/
-        }
-
+      if (item_val->result_type() == STRING_RESULT && !field->binary()) {
         String *pStr = NULL;
+        String conv_str;
+        char buff[MAX_FIELD_WIDTH] = {0};
         String str(buff, sizeof(buff), item_val->charset_for_protocol());
+
         pStr = item_val->val_str(&str);
         if (NULL == pStr) {
           rc = SDB_ERR_INVALID_ARG;
           break;
         }
-        String conv_str;
-        if (!my_charset_same(pStr->charset(), &SDB_CHARSET)) {
-          rc = sdb_convert_charset(*pStr, conv_str, &SDB_CHARSET);
-          if (rc) {
-            break;
+
+        if (!my_charset_same(pStr->charset(), &my_charset_bin)) {
+          if (!my_charset_same(pStr->charset(), &SDB_CHARSET)) {
+            rc = sdb_convert_charset(*pStr, conv_str, &SDB_CHARSET);
+            if (rc) {
+              break;
+            }
+            pStr = &conv_str;
           }
-          pStr = &conv_str;
+
+          if (MYSQL_TYPE_STRING == field->type() ||
+              MYSQL_TYPE_VAR_STRING == field->type()) {
+            // Trailing space of CHAR/ENUM/SET condition should be stripped.
+            pStr->strip_sp();
+          }
         }
 
         if (NULL == arr_builder) {
@@ -513,8 +496,6 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
 
     case MYSQL_TYPE_NULL:
     case MYSQL_TYPE_JSON:
-    case MYSQL_TYPE_ENUM:
-    case MYSQL_TYPE_SET:
     case MYSQL_TYPE_GEOMETRY:
     default: {
       rc = SDB_ERR_TYPE_UNSUPPORTED;
