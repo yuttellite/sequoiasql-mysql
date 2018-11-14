@@ -454,10 +454,7 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
         time = time * 100 + ltime.minute;
         time = time * 100 + ltime.second;
         if (ltime.second_part) {
-          double ms = ltime.second_part;
-          while (ms >= 1.0) {
-            ms /= 10;
-          }
+          double ms = ltime.second_part / (double)1000000;
           time += ms;
         }
         if (ltime.neg) {
