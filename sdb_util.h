@@ -19,6 +19,8 @@
 #include <sql_class.h>
 #include <thr_mutex.h>
 
+#define SDB_MIN(x, y) (((x) < (y)) ? (x) : (y))
+
 int sdb_parse_table_name(const char *from, char *db_name, int db_name_max_size,
                          char *table_name, int table_name_max_size);
 

@@ -930,8 +930,17 @@ int ha_sdb::obj_to_row(bson::BSONObj &obj, uchar *buf) {
         field->store(dataTmp, lenTmp, &my_charset_bin);
         break;
       }
-      // datetime is stored as string
       case bson::String: {
+        // datetime is stored as string
+        if (MYSQL_TYPE_DATETIME == field->type()) {
+          static const char *zero_dt = "0000-00-00 00:00:00.000000";
+          if (0 == strncmp(zero_dt, elem.valuestr(),
+                           SDB_MIN(elem.valuestrsize() - 1,
+                                   (int)sizeof(zero_dt) - 1))) {
+            // This is zero value of datetime, no need to store.
+            break;
+          }
+        }
         field->store(elem.valuestr(), elem.valuestrsize() - 1, &SDB_CHARSET);
         break;
       }
