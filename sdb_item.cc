@@ -475,10 +475,12 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
     case MYSQL_TYPE_YEAR: {
       if (INT_RESULT == item_val->result_type()) {
         longlong value = item_val->val_int();
-        if (value > 0 && value < YY_PART_YEAR) {
-          value += 2000;  // 2000 - 2069
-        } else if (value < 100) {
-          value += 1900;  // 1970 - 2000
+        if (value > 0) {
+          if (value < YY_PART_YEAR) {
+            value += 2000;  // 2000 - 2069
+          } else if (value < 100) {
+            value += 1900;  // 1970 - 2000
+          }
         }
         BSON_APPEND(field_name, value, obj, arr_builder);
       } else {
