@@ -751,19 +751,34 @@ int ha_sdb::index_read_map(uchar *buf, const uchar *key_ptr,
   int order_direction = 1;
 
   if (NULL != key_ptr && active_index < MAX_KEY) {
-    rc = build_match_obj_by_start_stop_key(active_index, key_ptr, keypart_map,
-                                           find_flag, end_range, table,
-                                           condition_idx, &order_direction);
-    if (rc) {
+    KEY *key_info = table->key_info + active_index;
+    key_range start_key;
+    start_key.key = key_ptr;
+    start_key.length = calculate_key_len(table, active_index, keypart_map);
+    start_key.keypart_map = keypart_map;
+    start_key.flag = find_flag;
+
+    bson::BSONObj tmp;
+    int direction = 0;
+
+    rc = sdb_create_condition_from_key(table, key_info, &start_key, end_range,
+                                       0, (NULL != end_range) ? eq_range : 0,
+                                       condition_idx);
+    if (0 != rc) {
       SDB_LOG_ERROR("Fail to build index match object. rc: %d", rc);
       goto error;
     }
+
+    order_direction = sdb_get_key_direction(find_flag);
   }
 
   if (!condition.isEmpty()) {
-    cond_builder.appendElements(condition);
-    cond_builder.appendElements(condition_idx);
-    condition = cond_builder.obj();
+    if (!condition_idx.isEmpty()) {
+      bson::BSONArrayBuilder arr_builder;
+      arr_builder.append(condition);
+      arr_builder.append(condition_idx);
+      condition = BSON("$and" << arr_builder.arr());
+    }
   } else {
     condition = condition_idx;
   }
