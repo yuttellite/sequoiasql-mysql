@@ -758,9 +758,6 @@ int ha_sdb::index_read_map(uchar *buf, const uchar *key_ptr,
     start_key.keypart_map = keypart_map;
     start_key.flag = find_flag;
 
-    bson::BSONObj tmp;
-    int direction = 0;
-
     rc = sdb_create_condition_from_key(table, key_info, &start_key, end_range,
                                        0, (NULL != end_range) ? eq_range : 0,
                                        condition_idx);
@@ -1279,6 +1276,7 @@ int ha_sdb::start_statement(THD *thd, uint table_count) {
         if (rc != 0) {
           goto error;
         }
+        trans_register_ha(thd, FALSE, ht, NULL);
       }
     }
   } else {
@@ -1317,7 +1315,11 @@ int ha_sdb::external_lock(THD *thd, int lock_type) {
           This happens if the thread didn't update any rows
           We must in this case close the transaction to release resources
         */
-        rc = thd_sdb->get_conn()->commit_transaction();
+        if (thd->is_error()) {
+          rc = thd_sdb->get_conn()->rollback_transaction();
+        } else {
+          rc = thd_sdb->get_conn()->commit_transaction();
+        }
         if (0 != rc) {
           goto error;
         }
@@ -1928,22 +1930,13 @@ static void init_sdb_psi_keys(void) {
 }
 #endif
 
-/*****************************************************************/ /**
- Commits a transaction in
- @return 0 */
-static int sdb_commit(
-    /*============*/
-    handlerton *hton, THD *thd, bool commit_trx) /*!< in: true - commit
-                                     transaction false - the current SQL
-                                     statement ended */
-{
+// Commit a transaction started in SequoiaDB.
+static int sdb_commit(handlerton *hton, THD *thd, bool all) {
   int rc = 0;
+  Thd_sdb *thd_sdb = thd_get_thd_sdb(thd);
+  Sdb_conn *connection;
 
-  Sdb_conn *connection = NULL;
-
-  if (!commit_trx) {
-    goto done;
-  }
+  thd_sdb->start_stmt_count = 0;
 
   connection = check_sdb_in_thd(thd, true);
   if (NULL == connection) {
@@ -1952,13 +1945,29 @@ static int sdb_commit(
   }
   DBUG_ASSERT(connection->thread_id() == thd->thread_id());
 
-  thd_get_thd_sdb(thd)->start_stmt_count = 0;
+  if (!connection->is_transaction_on()) {
+    goto done;
+  }
 
-  if (connection->is_transaction_on()) {
-    rc = connection->commit_transaction();
-    if (0 != rc) {
-      goto error;
-    }
+  if (!all && thd_test_options(thd, OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN)) {
+    /*
+      An odditity in the handler interface is that commit on handlerton
+      is called to indicate end of statement only in cases where
+      autocommit isn't used and the all flag isn't set.
+
+      We also leave quickly when a transaction haven't even been started,
+      in this case we are safe that no clean up is needed. In this case
+      the MySQL Server could handle the query without contacting the
+      SequoiaDB.
+    */
+    thd_sdb->save_point_count++;
+    goto done;
+  }
+  thd_sdb->save_point_count = 0;
+
+  rc = connection->commit_transaction();
+  if (0 != rc) {
+    goto error;
   }
 
 done:
@@ -1967,22 +1976,13 @@ error:
   goto done;
 }
 
-/*****************************************************************/ /**
- Rolls back a transaction
- @return 0 if success */
-static int sdb_rollback(
-    /*==============*/
-    handlerton *hton, THD *thd, bool rollback_trx) /*!< in: TRUE - rollback
-                                     entire transaction FALSE - rollback the
-                                     current statement only */
-{
+// Rollback a transaction started in SequoiaDB.
+static int sdb_rollback(handlerton *hton, THD *thd, bool all) {
   int rc = 0;
+  Thd_sdb *thd_sdb = thd_get_thd_sdb(thd);
+  Sdb_conn *connection;
 
-  Sdb_conn *connection = NULL;
-
-  if (!rollback_trx) {
-    goto done;
-  }
+  thd_sdb->start_stmt_count = 0;
 
   connection = check_sdb_in_thd(thd, true);
   if (NULL == connection) {
@@ -1991,18 +1991,31 @@ static int sdb_rollback(
   }
   DBUG_ASSERT(connection->thread_id() == thd->thread_id());
 
-  thd_get_thd_sdb(thd)->start_stmt_count = 0;
+  if (!connection->is_transaction_on()) {
+    goto done;
+  }
 
-  if (connection->is_transaction_on()) {
-    rc = connection->rollback_transaction();
-    if (0 != rc) {
-      goto error;
-    }
+  if (!all && thd_test_options(thd, OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN) &&
+      (thd_sdb->save_point_count > 0)) {
+    /*
+      Ignore end-of-statement until real rollback or commit is called
+      as SequoiaDB does not support rollback statement
+      - mark that rollback was unsuccessful, this will cause full rollback
+      of the transaction
+    */
+    thd_mark_transaction_to_rollback(thd, 1);
+    my_error(ER_WARN_ENGINE_TRANSACTION_ROLLBACK, MYF(0), "SequoiaDB");
+    goto done;
+  }
+  thd_sdb->save_point_count = 0;
+
+  rc = connection->rollback_transaction();
+  if (0 != rc) {
+    goto error;
   }
 
 done:
-  // always return 0 because rollback will not be failed.
-  return 0;
+  return rc;
 error:
   goto done;
 }
