@@ -1613,7 +1613,6 @@ int ha_sdb::rename_table(const char *from, const char *to) {
 
   if (strcmp(old_db_name, new_db_name) != 0) {
     rc = HA_ERR_NOT_ALLOWED_COMMAND;
-    SDB_PRINT_ERROR(rc, "Can't change database name when rename table.");
     goto error;
   }
 
