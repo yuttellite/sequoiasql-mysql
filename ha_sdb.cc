@@ -892,8 +892,6 @@ int ha_sdb::rnd_end() {
 }
 
 int ha_sdb::obj_to_row(bson::BSONObj &obj, uchar *buf) {
-  // TODO: parse other types
-  // get filed by field-name, order by filed_index
   int rc = 0;
   bool read_all;
   my_bitmap_map *org_bitmap;
@@ -901,6 +899,11 @@ int ha_sdb::obj_to_row(bson::BSONObj &obj, uchar *buf) {
   memset(buf, 0, table->s->null_bytes);
 
   read_all = !bitmap_is_clear_all(table->write_set);
+
+  // allow zero date
+  sql_mode_t old_sql_mode = table->in_use->variables.sql_mode;
+  table->in_use->variables.sql_mode &=
+      ~(MODE_NO_ZERO_DATE | MODE_NO_ZERO_IN_DATE);
 
   /* Avoid asserts in ::store() for columns that are not going to be updated */
   org_bitmap = dbug_tmp_use_all_columns(table, table->write_set);
@@ -944,15 +947,6 @@ int ha_sdb::obj_to_row(bson::BSONObj &obj, uchar *buf) {
       }
       case bson::String: {
         // datetime is stored as string
-        if (MYSQL_TYPE_DATETIME == field->type()) {
-          static const char *zero_dt = "0000-00-00 00:00:00.000000";
-          if (0 == strncmp(zero_dt, elem.valuestr(),
-                           SDB_MIN(elem.valuestrsize() - 1,
-                                   (int)sizeof(zero_dt) - 1))) {
-            // This is zero value of datetime, no need to store.
-            break;
-          }
-        }
         field->store(elem.valuestr(), elem.valuestrsize() - 1, &SDB_CHARSET);
         break;
       }
@@ -1021,8 +1015,10 @@ int ha_sdb::obj_to_row(bson::BSONObj &obj, uchar *buf) {
       }
     }
   }
+
 done:
   dbug_tmp_restore_column_map(table->write_set, org_bitmap);
+  table->in_use->variables.sql_mode = old_sql_mode;
   return rc;
 error:
   goto done;
