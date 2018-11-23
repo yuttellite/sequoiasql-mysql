@@ -76,6 +76,26 @@ static bool get_time_from_item_string(Item *item, MYSQL_TIME *ltime) {
   return str_to_time(res, ltime, 0, &status);
 }
 
+// This function is similar to Item::get_timeval() but without warning.
+static bool get_timeval(Item *item, struct timeval *tm) {
+  MYSQL_TIME ltime;
+  int warnings = 0;
+
+  if (get_date_from_item_string(item, &ltime, TIME_FUZZY_DATE)) {
+    goto error; /* Could not extract date from the value */
+  }
+
+  if (datetime_to_timeval(current_thd, &ltime, tm, &warnings)) {
+    goto error; /* Value is out of the supported range */
+  }
+
+  return false; /* Value is a good Unix timestamp */
+
+error:
+  tm->tv_sec = tm->tv_usec = 0;
+  return true;
+}
+
 int Sdb_logic_item::push(Sdb_item *cond_item) {
   int rc = 0;
   bson::BSONObj obj_tmp;
@@ -392,33 +412,20 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
     }
 
     case MYSQL_TYPE_TIMESTAMP: {
-      MYSQL_TIME ltime;
+      struct timeval tm;
       if (item_val->result_type() != STRING_RESULT ||
-          get_date_from_item_string(item_val, &ltime, TIME_FUZZY_DATE) ||
-          ltime.year > 2037 || ltime.year < 1902) {
+          get_timeval(item_val, &tm)) {
         rc = SDB_ERR_COND_UNEXPECTED_ITEM;
         goto error;
       } else {
-        struct tm tm_val;
-        tm_val.tm_sec = ltime.second;
-        tm_val.tm_min = ltime.minute;
-        tm_val.tm_hour = ltime.hour;
-        tm_val.tm_mday = ltime.day;
-        tm_val.tm_mon = ltime.month - 1;
-        tm_val.tm_year = ltime.year - 1900;
-        tm_val.tm_wday = 0;
-        tm_val.tm_yday = 0;
-        tm_val.tm_isdst = 0;
-        time_t time_tmp = mktime(&tm_val);
-        unsigned long long time_val_tmp;
-        memcpy((char *)&time_val_tmp, &(ltime.second_part), 4);
-        memcpy((char *)&time_val_tmp + 4, &time_tmp, 4);
+        bson::OpTime t(tm.tv_sec, tm.tv_usec);
+        long long time_val = t.asDate();
         if (NULL == arr_builder) {
           bson::BSONObjBuilder obj_builder;
-          obj_builder.appendTimestamp(field_name, time_val_tmp);
+          obj_builder.appendTimestamp(field_name, time_val);
           obj = obj_builder.obj();
         } else {
-          arr_builder->appendTimestamp(time_val_tmp);
+          arr_builder->appendTimestamp(time_val);
         }
       }
       break;
