@@ -18,7 +18,7 @@
 static const char *SDB_ADDR_DFT = "localhost:11810";
 static const my_bool SDB_USE_PARTITION_DFT = TRUE;
 static const my_bool SDB_DEBUG_LOG_DFT = FALSE;
-static const my_bool SDB_DEFAULT_USE_BULK_INSERT = FALSE;
+static const my_bool SDB_DEFAULT_USE_BULK_INSERT = TRUE;
 static const my_bool SDB_DEFAULT_USE_AUTOCOMMIT = TRUE;
 static const int SDB_DEFAULT_BULK_INSERT_SIZE = 100;
 
