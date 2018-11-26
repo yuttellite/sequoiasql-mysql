@@ -21,6 +21,8 @@ static const my_bool SDB_DEBUG_LOG_DFT = FALSE;
 static const my_bool SDB_DEFAULT_USE_BULK_INSERT = TRUE;
 static const my_bool SDB_DEFAULT_USE_AUTOCOMMIT = TRUE;
 static const int SDB_DEFAULT_BULK_INSERT_SIZE = 100;
+static const char *SDB_USER_DFT = "";
+static const char *SDB_PASSWORD_DFT = "";
 
 char *sdb_conn_str = NULL;
 my_bool sdb_use_partition = SDB_USE_PARTITION_DFT;
@@ -28,6 +30,10 @@ my_bool sdb_use_bulk_insert = SDB_DEFAULT_USE_BULK_INSERT;
 int sdb_bulk_insert_size = SDB_DEFAULT_BULK_INSERT_SIZE;
 my_bool sdb_use_autocommit = SDB_DEFAULT_USE_AUTOCOMMIT;
 my_bool sdb_debug_log = SDB_DEBUG_LOG_DFT;
+char *sdb_user = NULL;
+char *sdb_password = NULL;
+String sdb_encoded_password;
+Sdb_encryption sdb_passwd_encryption;
 
 static void sdb_use_partition_update(THD *thd, struct st_mysql_sys_var *var,
                                      void *var_ptr, const void *save) {
@@ -75,6 +81,14 @@ static MYSQL_SYSVAR_BOOL(use_autocommit, sdb_use_autocommit,
 static MYSQL_SYSVAR_BOOL(debug_log, sdb_debug_log, PLUGIN_VAR_OPCMDARG,
                          "turn on debug log of sequoiadb storage engine", NULL,
                          sdb_debug_log_update, SDB_DEBUG_LOG_DFT);
+static MYSQL_SYSVAR_STR(user, sdb_user,
+                        PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_READONLY,
+                        "SequoiaDB authentication user", NULL, NULL,
+                        SDB_USER_DFT);
+static MYSQL_SYSVAR_STR(password, sdb_password,
+                        PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_READONLY,
+                        "SequoiaDB authentication password", NULL, NULL,
+                        SDB_PASSWORD_DFT);
 
 struct st_mysql_sys_var *sdb_sys_vars[] = {MYSQL_SYSVAR(conn_addr),
                                            MYSQL_SYSVAR(use_partition),
@@ -82,6 +96,8 @@ struct st_mysql_sys_var *sdb_sys_vars[] = {MYSQL_SYSVAR(conn_addr),
                                            MYSQL_SYSVAR(bulk_insert_size),
                                            MYSQL_SYSVAR(use_autocommit),
                                            MYSQL_SYSVAR(debug_log),
+                                           MYSQL_SYSVAR(user),
+                                           MYSQL_SYSVAR(password),
                                            NULL};
 
 Sdb_conn_addrs::Sdb_conn_addrs() : conn_num(0) {
@@ -164,4 +180,26 @@ const char **Sdb_conn_addrs::get_conn_addrs() const {
 
 int Sdb_conn_addrs::get_conn_num() const {
   return conn_num;
+}
+
+int sdb_encrypt_password() {
+  int rc = 0;
+  String src_password(sdb_password, &my_charset_bin);
+
+  rc = sdb_passwd_encryption.encrypt(src_password, sdb_encoded_password);
+  if (rc) {
+    goto error;
+  }
+
+  for (int i = 0; i < src_password.length(); ++i) {
+    src_password[i] = '*';
+  }
+done:
+  return rc;
+error:
+  goto done;
+}
+
+int sdb_get_password(String &res) {
+  return sdb_passwd_encryption.decrypt(sdb_encoded_password, res);
 }

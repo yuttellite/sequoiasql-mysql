@@ -2057,6 +2057,7 @@ static int sdb_close_connection(handlerton *hton, THD *thd) {
 }
 
 static int sdb_init_func(void *p) {
+  int rc = SDB_ERR_OK;
   Sdb_conn_addrs conn_addrs;
 #ifdef HAVE_PSI_INTERFACE
   init_sdb_psi_keys();
@@ -2075,6 +2076,13 @@ static int sdb_init_func(void *p) {
   sdb_hton->close_connection = sdb_close_connection;
   if (conn_addrs.parse_conn_addrs(sdb_conn_str)) {
     SDB_LOG_ERROR("Invalid value sequoiadb_conn_addr=%s", sdb_conn_str);
+    return 1;
+  }
+
+  rc = sdb_encrypt_password();
+  if (SDB_ERR_OK != rc)
+  {
+    SDB_LOG_ERROR("Failed to encrypt password, rc=%d", rc);
     return 1;
   }
 
@@ -2107,3 +2115,4 @@ mysql_declare_plugin(sequoiadb){
     NULL,          /* config options */
     0,             /* flags */
 } mysql_declare_plugin_end;
+
