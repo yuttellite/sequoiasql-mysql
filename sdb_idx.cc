@@ -27,8 +27,6 @@
 #include "sdb_util.h"
 #include "sql_table.h"
 
-#define DATETIMEF_INT_OFS 0x8000000000LL
-
 static inline int get_variable_key_length(const uchar *A) {
   return (int)(((uint16)(A[0])) + ((uint16)(A[1]) << 8));
 }
@@ -143,153 +141,64 @@ error:
   goto done;
 }
 
-typedef union _sdb_key_common_type {
-  char sz_data[8];
-  int8 int8_val;
-  uint8 uint8_val;
-  int16 int16_val;
-  uint16 uint16_val;
-  int32 int24_val;
-  uint32 uint24_val;
-  int32 int32_val;
-  uint32 uint32_val;
-  int64 int64_val;
-  uint64 uint64_val;
-} sdb_key_common_type;
-
-void get_unsigned_key_val(const uchar *key_ptr, const KEY_PART_INFO *key_part,
-                          bson::BSONObjBuilder &obj_builder,
-                          const char *op_str) {
-  sdb_key_common_type val_tmp;
-  val_tmp.uint64_val = 0;
-  if (NULL == key_ptr || key_part->length > sizeof(val_tmp)) {
-    goto done;
-  }
-
-  memcpy(&(val_tmp.sz_data[0]),
-         key_ptr + key_part->store_length - key_part->length, key_part->length);
-  switch (key_part->length) {
-    case 1: {
-      obj_builder.append(op_str, val_tmp.uint8_val);
-      break;
-    }
-    case 2: {
-      obj_builder.append(op_str, val_tmp.uint16_val);
-      break;
-    }
-    case 3:
-    case 4: {
-      if (val_tmp.int32_val >= 0) {
-        obj_builder.append(op_str, val_tmp.int32_val);
-      } else {
-        obj_builder.append(op_str, val_tmp.int64_val);
-      }
-      break;
-    }
-    case 8: {
-      if (val_tmp.int64_val >= 0) {
-        obj_builder.append(op_str, val_tmp.int64_val);
-      } else {
-        bson::bsonDecimal decimal_tmp;
-        char buf_tmp[24] = {0};
-        sprintf(buf_tmp, "%llu", val_tmp.uint64_val);
-        decimal_tmp.fromString(buf_tmp);
-        obj_builder.append(op_str, decimal_tmp);
-      }
-      break;
-    }
-    default:
-      break;
-  }
-done:
-  return;
-}
-
-void get_signed_key_val(const uchar *key_ptr, const KEY_PART_INFO *key_part,
-                        bson::BSONObjBuilder &obj_builder, const char *op_str) {
-  sdb_key_common_type val_tmp;
-  val_tmp.uint64_val = 0;
-  if (NULL == key_ptr || key_part->length > sizeof(val_tmp)) {
-    goto done;
-  }
-
-  memcpy(&(val_tmp.sz_data[0]),
-         key_ptr + key_part->store_length - key_part->length, key_part->length);
-  switch (key_part->length) {
-    case 1: {
-      obj_builder.append(op_str, val_tmp.int8_val);
-      break;
-    }
-    case 2: {
-      obj_builder.append(op_str, val_tmp.int16_val);
-      break;
-    }
-    case 3: {
-      if (val_tmp.int32_val & 0X800000) {
-        val_tmp.sz_data[3] = 0XFF;
-      }
-      obj_builder.append(op_str, val_tmp.int32_val);
-      break;
-    }
-    case 4: {
-      obj_builder.append(op_str, val_tmp.int32_val);
-      break;
-    }
-    case 8: {
-      obj_builder.append(op_str, val_tmp.int64_val);
-      break;
-    }
-    default:
-      break;
-  }
-
-done:
-  return;
-}
-
-void get_int_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
-                     bson::BSONObj &obj, const char *op_str) {
+static void get_int_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
+                            bson::BSONObj &obj, const char *op_str) {
   bson::BSONObjBuilder obj_builder;
-  if (!((Field_num *)(key_part->field))->unsigned_flag) {
-    get_signed_key_val(key_ptr, key_part, obj_builder, op_str);
+  Field *field = key_part->field;
+  const uchar *new_ptr = key_ptr + key_part->store_length - key_part->length;
+  longlong value = field->val_int(new_ptr);
+  if (value < 0 && ((Field_num *)field)->unsigned_flag) {
+    // overflow UINT64, so store as DECIMAL
+    bson::bsonDecimal decimal_val;
+    char buf[24] = {0};
+    sprintf(buf, "%llu", (uint64)value);
+    decimal_val.fromString(buf);
+    obj_builder.append(op_str, decimal_val);
+  } else if (value > INT_MAX32 || value < INT_MIN32) {
+    // overflow INT32, so store as INT64
+    obj_builder.append(op_str, (long long)value);
   } else {
-    get_unsigned_key_val(key_ptr, key_part, obj_builder, op_str);
+    obj_builder.append(op_str, (int)value);
   }
   obj = obj_builder.obj();
 }
 
-void get_text_key_val(const uchar *key_ptr, bson::BSONObjBuilder &obj_builder,
-                      const char *op_str, int length) {
+static void get_float_key_obj(const uchar *key_ptr,
+                              const KEY_PART_INFO *key_part, bson::BSONObj &obj,
+                              const char *op_str) {
+  bson::BSONObjBuilder obj_builder;
+  Field *field = key_part->field;
+  const uchar *new_ptr = key_ptr + key_part->store_length - key_part->length;
+  const uchar *old_ptr = field->ptr;
+  field->ptr = (uchar *)new_ptr;
+  double value = field->val_real();
+  field->ptr = (uchar *)old_ptr;
+  obj_builder.append(op_str, value);
+  obj = obj_builder.obj();
+}
+
+static void get_text_key_val(const uchar *key_ptr,
+                             bson::BSONObjBuilder &obj_builder,
+                             const char *op_str, int length) {
   obj_builder.appendStrWithNoTerminating(op_str, (const char *)key_ptr, length);
 }
 
-void get_enum_key_val(const uchar *key_ptr, const KEY_PART_INFO *key_part,
-                      String &str_val) {
-  longlong org_val = key_part->field->val_int();
-
-  // get the enum-string by field
-  longlong new_val = 0;
-  memcpy(&new_val, key_ptr + key_part->store_length - key_part->length,
-         key_part->length);
-  if (org_val != new_val) {
-    key_part->field->store(new_val, false);
-  }
+static void get_enum_key_val(const uchar *key_ptr,
+                             const KEY_PART_INFO *key_part, String &str_val) {
+  const uchar *new_ptr = key_ptr + key_part->store_length - key_part->length;
 
   // enum charset must be field_charset(latin1), so this convertion is
   // necessary. we assert content is convertable, because error will be return
   // when insert.
   String org_str;
-  key_part->field->val_str(&org_str);
+  key_part->field->val_str(&org_str, new_ptr);
   sdb_convert_charset(org_str, str_val, &SDB_CHARSET);
-
-  // restore the original value
-  if (org_val != new_val) {
-    key_part->field->store(org_val, false);
-  }
 }
 
-void get_enum_key_val(const uchar *key_ptr, const KEY_PART_INFO *key_part,
-                      bson::BSONObjBuilder &obj_builder, const char *op_str) {
+static void get_enum_key_val(const uchar *key_ptr,
+                             const KEY_PART_INFO *key_part,
+                             bson::BSONObjBuilder &obj_builder,
+                             const char *op_str) {
   char buf[SDB_IDX_FIELD_SIZE_MAX + 1] = {0};
   String str_val(buf, SDB_IDX_FIELD_SIZE_MAX, key_part->field->charset());
   get_enum_key_val(key_ptr, key_part, str_val);
@@ -297,8 +206,8 @@ void get_enum_key_val(const uchar *key_ptr, const KEY_PART_INFO *key_part,
                                          str_val.length());
 }
 
-int get_text_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
-                     bson::BSONObj &obj, const char *op_str) {
+static int get_text_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
+                            bson::BSONObj &obj, const char *op_str) {
   int rc = SDB_ERR_OK;
   bson::BSONObjBuilder obj_builder;
   const int suffix_len = 9;  // 9 == strlen( "(%c){0,}$" )
@@ -424,101 +333,16 @@ error:
   goto done;
 }
 
-void get_float_key_val(const uchar *key_ptr, const KEY_PART_INFO *key_part,
-                       bson::BSONObjBuilder &obj_builder, const char *op_str) {
-  if (NULL == key_ptr) {
-    return;
-  }
-
-  if (4 == key_part->length) {
-    float tmp =
-        *((float *)(key_ptr + key_part->store_length - key_part->length));
-    obj_builder.append(op_str, tmp);
-  } else if (8 == key_part->length) {
-    double tmp =
-        *((double *)(key_ptr + key_part->store_length - key_part->length));
-    obj_builder.append(op_str, tmp);
-  }
-}
-
-void get_float_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
-                       bson::BSONObj &obj, const char *op_str) {
+static void get_datetime_key_obj(const uchar *key_ptr,
+                                 const KEY_PART_INFO *key_part,
+                                 bson::BSONObj &obj, const char *op_str) {
   bson::BSONObjBuilder obj_builder;
-  get_float_key_val(key_ptr, key_part, obj_builder, op_str);
-  obj = obj_builder.obj();
-}
-
-void get_datetime_key_val(const uchar *key_ptr, const KEY_PART_INFO *key_part,
-                          bson::BSONObjBuilder &obj_builder,
-                          const char *op_str) {
-  MYSQL_TIME ltime;
-  longlong ymd = 0, hms = 0;
-  longlong ymdhms = 0, ym = 0;
-  longlong tmp = 0;
-  int frac = 0;
-  uint dec = key_part->field->decimals();
-  char buff[MAX_FIELD_WIDTH];
-  int key_start_pos = key_part->store_length - key_part->length;
-
-  if (NULL == key_ptr) {
-    return;
-  }
-
-  longlong intpart = mi_uint5korr(key_ptr + key_start_pos) - DATETIMEF_INT_OFS;
-
-  switch (dec) {
-    case 0:
-    default:
-      tmp = intpart << 24;
-      break;
-    case 1:
-    case 2:
-      frac = ((int)(signed char)(key_ptr + key_start_pos)[5] * 10000);
-      break;
-    case 3:
-    case 4:
-      frac = mi_sint2korr(key_ptr + key_start_pos + 5) * 100;
-      break;
-    case 5:
-    case 6:
-      frac = mi_sint3korr(key_ptr + key_start_pos + 5);
-      break;
-  }
-  tmp = (intpart << 24) + frac;
-
-  if ((ltime.neg = (tmp < 0)))
-    tmp = -tmp;
-
-  ltime.second_part = tmp % (1LL << 24);
-  ymdhms = tmp >> 24;
-
-  ymd = ymdhms >> 17;
-  ym = ymd >> 5;
-  hms = ymdhms % (1 << 17);
-
-  ltime.day = ymd % (1 << 5);
-  ltime.month = ym % 13;
-  ltime.year = (uint)(ym / 13);
-
-  ltime.second = hms % (1 << 6);
-  ltime.minute = (hms >> 6) % (1 << 6);
-  ltime.hour = (uint)(hms >> 12);
-
-  ltime.time_type = MYSQL_TIMESTAMP_DATETIME;
-
-  int len = sprintf(buff, "%04u-%02u-%02u %s%02u:%02u:%02u", ltime.year,
-                    ltime.month, ltime.day, (ltime.neg ? "-" : ""), ltime.hour,
-                    ltime.minute, ltime.second);
-  if (dec) {
-    len += sprintf(buff + len, ".%0*lu", (int)dec, ltime.second_part);
-  }
-  obj_builder.appendStrWithNoTerminating(op_str, (const char *)buff, len);
-}
-
-void get_datetime_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
-                          bson::BSONObj &obj, const char *op_str) {
-  bson::BSONObjBuilder obj_builder;
-  get_datetime_key_val(key_ptr, key_part, obj_builder, op_str);
+  const uchar *new_ptr = key_ptr + key_part->store_length - key_part->length;
+  String org_str, str_val;
+  key_part->field->val_str(&org_str, new_ptr);
+  sdb_convert_charset(org_str, str_val, &SDB_CHARSET);
+  obj_builder.appendStrWithNoTerminating(op_str, str_val.ptr(),
+                                         str_val.length());
   obj = obj_builder.obj();
 }
 
@@ -614,7 +438,7 @@ int sdb_create_condition_from_key(TABLE *table, KEY *key_info,
     return rc;
   }
 
-  old_map = dbug_tmp_use_all_columns(table, table->write_set);
+  old_map = dbug_tmp_use_all_columns(table, table->read_set);
   for (uint i = 0; i <= 1; i++) {
     const KEY_PART_INFO *key_part;
     bool ignore_text_key = false;
@@ -749,7 +573,7 @@ int sdb_create_condition_from_key(TABLE *table, KEY *key_info,
       key_ptr += store_length;
     }
   }
-  dbug_tmp_restore_column_map(table->write_set, old_map);
+  dbug_tmp_restore_column_map(table->read_set, old_map);
 
   array = builder.arr();
   if (array.nFields() > 1) {
@@ -761,6 +585,6 @@ int sdb_create_condition_from_key(TABLE *table, KEY *key_info,
   return rc;
 
 error:
-  dbug_tmp_restore_column_map(table->write_set, old_map);
+  dbug_tmp_restore_column_map(table->read_set, old_map);
   return rc;
 }
