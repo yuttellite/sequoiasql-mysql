@@ -52,12 +52,19 @@ static BOOLEAN is_field_indexable(const Field *field) {
   switch (field->type()) {
     case MYSQL_TYPE_TINY:
     case MYSQL_TYPE_SHORT:
-    case MYSQL_TYPE_LONG:
     case MYSQL_TYPE_INT24:
+    case MYSQL_TYPE_LONG:
+    case MYSQL_TYPE_LONGLONG:
+    case MYSQL_TYPE_BIT:
     case MYSQL_TYPE_FLOAT:
     case MYSQL_TYPE_DOUBLE:
-    case MYSQL_TYPE_LONGLONG:
+    case MYSQL_TYPE_DECIMAL:
+    case MYSQL_TYPE_NEWDECIMAL:
+    case MYSQL_TYPE_YEAR:
+    case MYSQL_TYPE_DATE:
+    case MYSQL_TYPE_TIME:
     case MYSQL_TYPE_DATETIME:
+    case MYSQL_TYPE_TIMESTAMP:
       return TRUE;
     case MYSQL_TYPE_VARCHAR:
     case MYSQL_TYPE_STRING:
@@ -142,7 +149,7 @@ error:
 }
 
 static void get_int_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
-                            bson::BSONObj &obj, const char *op_str) {
+                            const char *op_str, bson::BSONObj &obj) {
   bson::BSONObjBuilder obj_builder;
   Field *field = key_part->field;
   const uchar *new_ptr = key_ptr + key_part->store_length - key_part->length;
@@ -164,8 +171,8 @@ static void get_int_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
 }
 
 static void get_float_key_obj(const uchar *key_ptr,
-                              const KEY_PART_INFO *key_part, bson::BSONObj &obj,
-                              const char *op_str) {
+                              const KEY_PART_INFO *key_part, const char *op_str,
+                              bson::BSONObj &obj) {
   bson::BSONObjBuilder obj_builder;
   Field *field = key_part->field;
   const uchar *new_ptr = key_ptr + key_part->store_length - key_part->length;
@@ -174,6 +181,17 @@ static void get_float_key_obj(const uchar *key_ptr,
   double value = field->val_real();
   field->ptr = (uchar *)old_ptr;
   obj_builder.append(op_str, value);
+  obj = obj_builder.obj();
+}
+
+static void get_decimal_key_obj(const uchar *key_ptr,
+                                const KEY_PART_INFO *key_part,
+                                const char *op_str, bson::BSONObj &obj) {
+  bson::BSONObjBuilder obj_builder;
+  String str_val;
+  const uchar *new_ptr = key_ptr + key_part->store_length - key_part->length;
+  key_part->field->val_str(&str_val, new_ptr);
+  obj_builder.appendDecimal(op_str, str_val.c_ptr());
   obj = obj_builder.obj();
 }
 
@@ -207,7 +225,7 @@ static void get_enum_key_val(const uchar *key_ptr,
 }
 
 static int get_text_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
-                            bson::BSONObj &obj, const char *op_str) {
+                            const char *op_str, bson::BSONObj &obj) {
   int rc = SDB_ERR_OK;
   bson::BSONObjBuilder obj_builder;
   const int suffix_len = 9;  // 9 == strlen( "(%c){0,}$" )
@@ -333,9 +351,37 @@ error:
   goto done;
 }
 
+static void get_date_key_obj(const uchar *key_ptr,
+                             const KEY_PART_INFO *key_part, const char *op_str,
+                             bson::BSONObj &obj) {
+  bson::BSONObjBuilder obj_builder;
+  struct tm tm_val;
+  Field *field = key_part->field;
+  const uchar *new_ptr = key_ptr + key_part->store_length - key_part->length;
+  const uchar *old_ptr = field->ptr;
+  field->ptr = (uchar *)new_ptr;
+  longlong date_val = ((Field_newdate *)field)->val_int();
+  field->ptr = (uchar *)old_ptr;
+  tm_val.tm_sec = 0;
+  tm_val.tm_min = 0;
+  tm_val.tm_hour = 0;
+  tm_val.tm_mday = date_val % 100;
+  date_val = date_val / 100;
+  tm_val.tm_mon = date_val % 100 - 1;
+  date_val = date_val / 100;
+  tm_val.tm_year = date_val - 1900;
+  tm_val.tm_wday = 0;
+  tm_val.tm_yday = 0;
+  tm_val.tm_isdst = 0;
+  time_t time_tmp = mktime(&tm_val);
+  bson::Date_t dt((longlong)(time_tmp * 1000));
+  obj_builder.appendDate(op_str, dt);
+  obj = obj_builder.obj();
+}
+
 static void get_datetime_key_obj(const uchar *key_ptr,
                                  const KEY_PART_INFO *key_part,
-                                 bson::BSONObj &obj, const char *op_str) {
+                                 const char *op_str, bson::BSONObj &obj) {
   bson::BSONObjBuilder obj_builder;
   const uchar *new_ptr = key_ptr + key_part->store_length - key_part->length;
   String org_str, str_val;
@@ -343,6 +389,22 @@ static void get_datetime_key_obj(const uchar *key_ptr,
   sdb_convert_charset(org_str, str_val, &SDB_CHARSET);
   obj_builder.appendStrWithNoTerminating(op_str, str_val.ptr(),
                                          str_val.length());
+  obj = obj_builder.obj();
+}
+
+static void get_timestamp_key_obj(const uchar *key_ptr,
+                                  const KEY_PART_INFO *key_part,
+                                  const char *op_str, bson::BSONObj &obj) {
+  bson::BSONObjBuilder obj_builder;
+  struct timeval tm;
+  int warnings = 0;
+  Field *field = key_part->field;
+  const uchar *new_ptr = key_ptr + key_part->store_length - key_part->length;
+  const uchar *old_ptr = field->ptr;
+  field->ptr = (uchar *)new_ptr;
+  field->get_timestamp(&tm, &warnings);
+  field->ptr = (uchar *)old_ptr;
+  obj_builder.appendTimestamp(op_str, tm.tv_sec * 1000, tm.tv_usec);
   obj = obj_builder.obj();
 }
 
@@ -354,15 +416,35 @@ static int get_key_part_value(const KEY_PART_INFO *key_part,
   switch (key_part->field->type()) {
     case MYSQL_TYPE_TINY:
     case MYSQL_TYPE_SHORT:
-    case MYSQL_TYPE_LONG:
     case MYSQL_TYPE_INT24:
-    case MYSQL_TYPE_LONGLONG: {
-      get_int_key_obj(key_ptr, key_part, obj, op_str);
+    case MYSQL_TYPE_LONG:
+    case MYSQL_TYPE_LONGLONG:
+    case MYSQL_TYPE_BIT:
+    case MYSQL_TYPE_YEAR: {
+      get_int_key_obj(key_ptr, key_part, op_str, obj);
       break;
     }
     case MYSQL_TYPE_FLOAT:
-    case MYSQL_TYPE_DOUBLE: {
-      get_float_key_obj(key_ptr, key_part, obj, op_str);
+    case MYSQL_TYPE_DOUBLE:
+    case MYSQL_TYPE_TIME: {
+      get_float_key_obj(key_ptr, key_part, op_str, obj);
+      break;
+    }
+    case MYSQL_TYPE_DECIMAL:
+    case MYSQL_TYPE_NEWDECIMAL: {
+      get_decimal_key_obj(key_ptr, key_part, op_str, obj);
+      break;
+    }
+    case MYSQL_TYPE_DATE: {
+      get_date_key_obj(key_ptr, key_part, op_str, obj);
+      break;
+    }
+    case MYSQL_TYPE_DATETIME: {
+      get_datetime_key_obj(key_ptr, key_part, op_str, obj);
+      break;
+    }
+    case MYSQL_TYPE_TIMESTAMP: {
+      get_timestamp_key_obj(key_ptr, key_part, op_str, obj);
       break;
     }
     case MYSQL_TYPE_VARCHAR:
@@ -374,7 +456,7 @@ static int get_key_part_value(const KEY_PART_INFO *key_part,
     case MYSQL_TYPE_BLOB: {
       if (!key_part->field->binary()) {
         if (!ignore_text_key) {
-          rc = get_text_key_obj(key_ptr, key_part, obj, op_str);
+          rc = get_text_key_obj(key_ptr, key_part, op_str, obj);
           if (rc) {
             goto error;
           }
@@ -386,11 +468,6 @@ static int get_key_part_value(const KEY_PART_INFO *key_part,
       }
       break;
     }
-    case MYSQL_TYPE_DATETIME: {
-      get_datetime_key_obj(key_ptr, key_part, obj, op_str);
-      break;
-    }
-
     default:
       rc = HA_ERR_UNSUPPORTED;
       goto error;
