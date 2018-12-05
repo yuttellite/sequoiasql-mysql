@@ -267,6 +267,8 @@ int ha_sdb::reset() {
     delete collection;
     collection = NULL;
   }
+  pushed_condition = SDB_EMPTY_BSON;
+  free_root(&blobroot, MYF(0));
   return 0;
 }
 
@@ -718,12 +720,11 @@ error:
 
 int ha_sdb::index_last(uchar *buf) {
   int rc = 0;
-  rc = index_read_one(condition, -1, buf);
+  rc = index_read_one(pushed_condition, -1, buf);
   if (rc) {
     goto error;
   }
 done:
-  condition = SDB_EMPTY_BSON;
   return rc;
 error:
   goto done;
@@ -731,12 +732,11 @@ error:
 
 int ha_sdb::index_first(uchar *buf) {
   int rc = 0;
-  rc = index_read_one(condition, 1, buf);
+  rc = index_read_one(pushed_condition, 1, buf);
   if (rc) {
     goto error;
   }
 done:
-  condition = SDB_EMPTY_BSON;
   return rc;
 error:
   goto done;
@@ -746,8 +746,9 @@ int ha_sdb::index_read_map(uchar *buf, const uchar *key_ptr,
                            key_part_map keypart_map,
                            enum ha_rkey_function find_flag) {
   int rc = 0;
-  bson::BSONObj order, hint, condition_idx;
   bson::BSONObjBuilder cond_builder;
+  bson::BSONObj condition = pushed_condition;
+  bson::BSONObj condition_idx;
   int order_direction = 1;
 
   if (NULL != key_ptr && active_index < MAX_KEY) {
@@ -784,8 +785,8 @@ int ha_sdb::index_read_map(uchar *buf, const uchar *key_ptr,
   if (rc) {
     goto error;
   }
+
 done:
-  condition = SDB_EMPTY_BSON;
   return rc;
 error:
   goto done;
@@ -851,7 +852,7 @@ error:
 int ha_sdb::index_init(uint idx, bool sorted) {
   active_index = idx;
   if (!pushed_cond) {
-    condition = SDB_EMPTY_BSON;
+    pushed_condition = SDB_EMPTY_BSON;
   }
   free_root(&blobroot, MYF(0));
   return 0;
@@ -878,7 +879,7 @@ double ha_sdb::read_time(uint index, uint ranges, ha_rows rows) {
 int ha_sdb::rnd_init(bool scan) {
   first_read = true;
   if (!pushed_cond) {
-    condition = SDB_EMPTY_BSON;
+    pushed_condition = SDB_EMPTY_BSON;
   }
   free_root(&blobroot, MYF(0));
   return 0;
@@ -1080,8 +1081,7 @@ int ha_sdb::rnd_next(uchar *buf) {
   DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
 
   if (first_read) {
-    rc = collection->query(condition);
-    condition = SDB_EMPTY_BSON;
+    rc = collection->query(pushed_condition);
     if (rc != 0) {
       goto error;
     }
@@ -1869,7 +1869,7 @@ const Item *ha_sdb::cond_push(const Item *cond) {
 
   try {
     sdb_parse_condtion(cond, &sdb_condition);
-    sdb_condition.to_bson(condition);
+    sdb_condition.to_bson(pushed_condition);
   } catch (bson::assertion e) {
     SDB_LOG_DEBUG("Exception[%s] occurs when build bson obj.", e.full.c_str());
     DBUG_ASSERT(0);
@@ -1888,7 +1888,7 @@ const Item *ha_sdb::cond_push(const Item *cond) {
           "Condition can't be pushed down. "
           "db=[unknown], sql=[unknown]");
     }
-    condition = SDB_EMPTY_BSON;
+    pushed_condition = SDB_EMPTY_BSON;
   }
 done:
   return remain_cond;
@@ -2080,8 +2080,7 @@ static int sdb_init_func(void *p) {
   }
 
   rc = sdb_encrypt_password();
-  if (SDB_ERR_OK != rc)
-  {
+  if (SDB_ERR_OK != rc) {
     SDB_LOG_ERROR("Failed to encrypt password, rc=%d", rc);
     return 1;
   }
@@ -2115,4 +2114,3 @@ mysql_declare_plugin(sequoiadb){
     NULL,          /* config options */
     0,             /* flags */
 } mysql_declare_plugin_end;
-

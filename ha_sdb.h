@@ -295,7 +295,7 @@ class ha_sdb : public handler {
   Sdb_cl *collection;
   bool first_read;
   bson::BSONObj cur_rec;
-  bson::BSONObj condition;
+  bson::BSONObj pushed_condition;
   Sdb_share *share;
   char db_name[SDB_CS_NAME_MAX_SIZE + 1];
   char table_name[SDB_CL_NAME_MAX_SIZE + 1];
