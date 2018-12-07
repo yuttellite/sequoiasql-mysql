@@ -363,7 +363,6 @@ int get_text_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
                      bson::BSONObj &obj, const char *op_str) {
   int rc = SDB_ERR_OK;
   bson::BSONObjBuilder obj_builder;
-  const int suffix_len = 9;  // 9 == strlen( "(%c){0,}$" )
   uchar key_field_str_buf[SDB_IDX_FIELD_SIZE_MAX + 32] = {
       0};  // reserve 32bytes for operators and '\0'
 
@@ -430,8 +429,7 @@ int get_text_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
       euqal search in sdb with
       '({a:{$regex:"^hello( ){0,}$"})'
       */
-      key_field_str_buf[0] = '^';
-      int cur_pos = 1;
+      int cur_pos = 0;
       if (key_part->field->real_type() == MYSQL_TYPE_ENUM ||
           key_part->field->real_type() == MYSQL_TYPE_SET) {
         char enum_val_buf[SDB_IDX_FIELD_SIZE_MAX] = {0};
@@ -449,13 +447,8 @@ int get_text_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
       }
 
       /*replace {a:{$et:"hello"}} with {a:{$regex:"^hello( ){0,}$"}}*/
-      if ('\0' == pad_char)
-        pad_char = ' ';
-      snprintf((char *)key_field_str_buf + cur_pos, suffix_len, "(%c){0,}$",
-               pad_char);
-      cur_pos += suffix_len;
       obj_builder.appendStrWithNoTerminating(
-          "$regex", (const char *)key_field_str_buf, cur_pos);
+          "$et", (const char *)key_field_str_buf, cur_pos);
     }
     /* Find next rec. after key-record, or part key where a="abcdefg" (a(10),
        key(a(5)->"abcde")) */
