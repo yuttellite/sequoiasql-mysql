@@ -17,13 +17,14 @@
 #define MYSQL_SERVER
 #endif
 
-#include "sql_class.h"
-#include "sql_table.h"
 #include "ha_sdb.h"
+#include <sql_class.h>
+#include <sql_table.h>
 #include <mysql/plugin.h>
-#include <client.hpp>
 #include <mysql/psi/mysql_file.h>
+#include <json_dom.h>
 #include <time.h>
+#include <client.hpp>
 #include "sdb_log.h"
 #include "sdb_conf.h"
 #include "sdb_cl.h"
@@ -440,18 +441,18 @@ int ha_sdb::field_to_obj(Field *field, bson::BSONObjBuilder &obj_builder) {
       break;
     }
     case MYSQL_TYPE_JSON: {
-      String val_tmp, conv_str;
-      field->val_str(&val_tmp);
-      String *str = &val_tmp;
-      if (!my_charset_same(str->charset(), &SDB_CHARSET)) {
-        rc = sdb_convert_charset(*str, conv_str, &SDB_CHARSET);
-        if (rc) {
-          goto error;
-        }
-        str = &conv_str;
+      Json_wrapper wr;
+      String buf;
+      Field_json *field_json = dynamic_cast<Field_json *>(field);
+
+      if (field_json->val_json(&wr) || wr.to_value().raw_binary(&buf)) {
+        my_error(ER_INVALID_JSON_BINARY_DATA, MYF(0));
+        rc = ER_INVALID_JSON_BINARY_DATA;
+        goto error;
       }
-      obj_builder.appendStrWithNoTerminating(field->field_name, str->ptr(),
-                                             str->length());
+
+      obj_builder.appendBinData(field->field_name, buf.length(),
+                                bson::BinDataGeneral, buf.ptr());
       break;
     }
     default: {
@@ -940,10 +941,14 @@ int ha_sdb::obj_to_row(bson::BSONObj &obj, uchar *buf) {
       case bson::BinData: {
         int lenTmp = 0;
         const char *dataTmp = elem.binData(lenTmp);
-        if (lenTmp < 0) {
-          lenTmp = 0;
+        if (MYSQL_TYPE_JSON != field->type()) {
+          field->store(dataTmp, lenTmp, &my_charset_bin);
+        } else {
+          Field_json *field_json = dynamic_cast<Field_json *>(field);
+          json_binary::Value v = json_binary::parse_binary(dataTmp, lenTmp);
+          Json_wrapper wr(v);
+          field_json->store_json(&wr);
         }
-        field->store(dataTmp, lenTmp, &my_charset_bin);
         break;
       }
       case bson::String: {
