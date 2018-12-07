@@ -268,6 +268,8 @@ int ha_sdb::reset() {
     delete collection;
     collection = NULL;
   }
+  condition = empty_obj;
+  free_root(&blobroot, MYF(0));
   return 0;
 }
 
@@ -706,7 +708,6 @@ int ha_sdb::index_last(uchar *buf) {
     goto error;
   }
 done:
-  condition = empty_obj;
   return rc;
 error:
   goto done;
@@ -719,7 +720,6 @@ int ha_sdb::index_first(uchar *buf) {
     goto error;
   }
 done:
-  condition = empty_obj;
   return rc;
 error:
   goto done;
@@ -729,8 +729,9 @@ int ha_sdb::index_read_map(uchar *buf, const uchar *key_ptr,
                            key_part_map keypart_map,
                            enum ha_rkey_function find_flag) {
   int rc = 0;
-  bson::BSONObj order, hint, condition_idx;
   bson::BSONObjBuilder cond_builder;
+  bson::BSONObj tmp_condition = condition;
+  bson::BSONObj condition_idx;
   int order_direction = 1;
 
   if (NULL != key_ptr && active_index < MAX_KEY) {
@@ -743,20 +744,19 @@ int ha_sdb::index_read_map(uchar *buf, const uchar *key_ptr,
     }
   }
 
-  if (!condition.isEmpty()) {
-    cond_builder.appendElements(condition);
+  if (!tmp_condition.isEmpty()) {
+    cond_builder.appendElements(tmp_condition);
     cond_builder.appendElements(condition_idx);
-    condition = cond_builder.obj();
+    tmp_condition = cond_builder.obj();
   } else {
-    condition = condition_idx;
+    tmp_condition = condition_idx;
   }
 
-  rc = index_read_one(condition, order_direction, buf);
+  rc = index_read_one(tmp_condition, order_direction, buf);
   if (rc) {
     goto error;
   }
 done:
-  condition = empty_obj;
   return rc;
 error:
   goto done;
@@ -1074,7 +1074,6 @@ int ha_sdb::rnd_next(uchar *buf) {
 
   if (first_read) {
     rc = collection->query(condition);
-    condition = empty_obj;
     if (rc != 0) {
       goto error;
     }
