@@ -198,13 +198,20 @@ uint ha_sdb::max_supported_keys() const {
   return MAX_KEY;
 }
 
-uint ha_sdb::max_supported_key_part_length() const {
-  return 1000;
-}
-
 uint ha_sdb::max_supported_key_length() const {
   return 1000;
 }
+
+#if MYSQL_VERSION_ID >= 50723
+uint ha_sdb::max_supported_key_part_length(
+    HA_CREATE_INFO *create_info MY_ATTRIBUTE((unused))) const {
+  return 1000;
+}
+#else
+uint ha_sdb::max_supported_key_part_length() const {
+  return 1000;
+}
+#endif
 
 int ha_sdb::open(const char *name, int mode, uint test_if_locked) {
   int rc = 0;

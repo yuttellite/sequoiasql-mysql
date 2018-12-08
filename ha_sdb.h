@@ -14,6 +14,7 @@
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
 #include <handler.h>
+#include <mysql_version.h>
 #include <client.hpp>
 #include <vector>
 #include "sdb_def.h"
@@ -95,7 +96,11 @@ class ha_sdb : public handler {
     There is no need to implement ..._key_... methods if your engine doesn't
     support indexes.
    */
+#if MYSQL_VERSION_ID >= 50723
+  uint max_supported_key_part_length(HA_CREATE_INFO *create_info) const;
+#else
   uint max_supported_key_part_length() const;
+#endif
 
   /** @brief
     unireg.cc will call this to make sure that the storage engine can handle
