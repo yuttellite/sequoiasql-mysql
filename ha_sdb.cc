@@ -445,7 +445,11 @@ int ha_sdb::field_to_obj(Field *field, bson::BSONObjBuilder &obj_builder) {
       String buf;
       Field_json *field_json = dynamic_cast<Field_json *>(field);
 
+#if MYSQL_VERSION_ID >= 50722
+      if (field_json->val_json(&wr) || wr.to_binary(&buf)) {
+#else
       if (field_json->val_json(&wr) || wr.to_value().raw_binary(&buf)) {
+#endif
         my_error(ER_INVALID_JSON_BINARY_DATA, MYF(0));
         rc = ER_INVALID_JSON_BINARY_DATA;
         goto error;
