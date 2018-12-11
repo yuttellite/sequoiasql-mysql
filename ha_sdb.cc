@@ -907,16 +907,21 @@ int ha_sdb::rnd_end() {
 int ha_sdb::obj_to_row(bson::BSONObj &obj, uchar *buf) {
   int rc = 0;
   bool read_all;
+  THD *thd;
   my_bitmap_map *org_bitmap;
 
   memset(buf, 0, table->s->null_bytes);
 
   read_all = !bitmap_is_clear_all(table->write_set);
+  thd = table->in_use;
 
   // allow zero date
-  sql_mode_t old_sql_mode = table->in_use->variables.sql_mode;
-  table->in_use->variables.sql_mode &=
-      ~(MODE_NO_ZERO_DATE | MODE_NO_ZERO_IN_DATE);
+  sql_mode_t old_sql_mode = thd->variables.sql_mode;
+  thd->variables.sql_mode &= ~(MODE_NO_ZERO_DATE | MODE_NO_ZERO_IN_DATE);
+
+  // ignore field warning
+  enum_check_fields old_check_fields = thd->count_cuted_fields;
+  thd->count_cuted_fields = CHECK_FIELD_IGNORE;
 
   /* Avoid asserts in ::store() for columns that are not going to be updated */
   org_bitmap = dbug_tmp_use_all_columns(table, table->write_set);
@@ -1035,7 +1040,8 @@ int ha_sdb::obj_to_row(bson::BSONObj &obj, uchar *buf) {
 
 done:
   dbug_tmp_restore_column_map(table->write_set, org_bitmap);
-  table->in_use->variables.sql_mode = old_sql_mode;
+  thd->count_cuted_fields = old_check_fields;
+  thd->variables.sql_mode = old_sql_mode;
   return rc;
 error:
   goto done;
