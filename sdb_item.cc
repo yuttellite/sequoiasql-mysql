@@ -40,13 +40,18 @@ static bool get_date_from_item_string(Item *item, MYSQL_TIME *ltime,
   MYSQL_TIME_STATUS status;
   THD *thd = current_thd;
   String tmp(buff, sizeof(buff), &my_charset_bin), *res;
+  Dummy_error_handler error_handler;  // ignore all error and warning states
+  bool ret = true;
 
   DBUG_ASSERT(NULL != item);
   DBUG_ASSERT(NULL != ltime);
 
+  thd->push_internal_handler(&error_handler);
+
   if (!(res = item->val_str(&tmp))) {
     set_zero_time(ltime, MYSQL_TIMESTAMP_DATETIME);
-    return true;
+    ret = true;
+    goto done;
   }
 
   if (thd->variables.sql_mode & MODE_NO_ZERO_DATE) {
@@ -56,24 +61,38 @@ static bool get_date_from_item_string(Item *item, MYSQL_TIME *ltime,
     flags |= TIME_INVALID_DATES;
   }
 
-  return str_to_datetime(res, ltime, flags, &status);
+  ret = str_to_datetime(res, ltime, flags, &status);
+
+done:
+  thd->pop_internal_handler();
+  return ret;
 }
 
 // This function is similar to Item::get_time_from_string() but without warning.
 static bool get_time_from_item_string(Item *item, MYSQL_TIME *ltime) {
   char buff[MAX_DATE_STRING_REP_LENGTH];
   MYSQL_TIME_STATUS status;
+  THD *thd = current_thd;
   String tmp(buff, sizeof(buff), &my_charset_bin), *res;
+  Dummy_error_handler error_handler;  // ignore all error and warning states
+  bool ret = true;
 
   DBUG_ASSERT(NULL != item);
   DBUG_ASSERT(NULL != ltime);
 
+  thd->push_internal_handler(&error_handler);
+
   if (!(res = item->val_str(&tmp))) {
     set_zero_time(ltime, MYSQL_TIMESTAMP_TIME);
-    return true;
+    ret = true;
+    goto done;
   }
 
-  return str_to_time(res, ltime, 0, &status);
+  ret = str_to_time(res, ltime, 0, &status);
+
+done:
+  thd->pop_internal_handler();
+  return ret;
 }
 
 // This function is similar to Item::get_timeval() but without warning.
