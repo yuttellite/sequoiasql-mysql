@@ -891,6 +891,12 @@ int Sdb_func_cmp::to_bson(bson::BSONObj &obj) {
   }
 
   if (cmp_with_field) {
+    if (item_field->field->type() == MYSQL_TYPE_JSON ||
+        ((Item_field *)item_val)->field->type() == MYSQL_TYPE_JSON) {
+      rc = SDB_ERR_COND_PART_UNSUPPORTED;
+      goto error;
+    }
+
     obj = BSON(item_field->field_name
                << BSON(name_tmp << BSON(
                            "$field" << ((Item_field *)item_val)->field_name)));
