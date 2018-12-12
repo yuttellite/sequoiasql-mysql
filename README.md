@@ -2,23 +2,23 @@
 
 SequoiaSQL - MySQL Storage Engine is a distributed MySQL storage engine.
 
-It currently supports SequoiaDB 3.0 as the backend database, and it will be extended to multiple databases such like MongoDB/Redis and etc...
+It currently supports SequoiaDB 3.x as the backend database, and it will be extended to multiple databases such like MongoDB/Redis and etc...
 
 In order to take advantages of scalability and performance, SequoiaSQL - MySQL Storage Engine can be used to replace InnoDB and store user data/index/lob in the backend distributed database.
 
 
 ## Building
 
-1. Get boost-1.59.0 and the source code of mysql-5.7.18.
-2. Copy the plugin code to the storage directory.
+1. Get boost-1.59.0, the source code of mysql-5.7.24 and SequoiaDB C++ driver 3.0.1.
+2. Clone the plugin code to the storage directory.
  ```bash
-mkdir -p mysql-5.7.18/storage/sequoiadb
-cp sequoiasql-mysql/* mysql-5.7.18/storage/sequoiadb
+cd mysql-5.7.24/storage
+git clone https://github.com/SequoiaDB/sequoiasql-mysql.git sequoiadb
  ```
 3. Build the plugin
  ```bash
-cd mysql-5.7.18
-cmake . -DWITH_BOOST=../thirdparty/boost/boost_1_59_0/ -DCMAKE_INSTALL_PREFIX=/opt/mysql -DMYSQL_DATADIR=/opt/mysql/data -DWITH_SDB_DRIVER=/opt/sequoiadb -DCMAKE_BUILD_TYPE=Release
+cd mysql-5.7.24
+cmake . -DWITH_BOOST=</path/to/boost_1_59_0/> -DCMAKE_INSTALL_PREFIX=/opt/mysql -DMYSQL_DATADIR=/opt/mysql/data -DWITH_SDB_DRIVER=</path/to/sequoiadb/driver> -DCMAKE_BUILD_TYPE=Release
 make install -j 4
  ```
 
