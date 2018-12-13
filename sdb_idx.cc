@@ -69,15 +69,14 @@ static BOOLEAN is_field_indexable(const Field *field) {
     case MYSQL_TYPE_VARCHAR:
     case MYSQL_TYPE_STRING:
     case MYSQL_TYPE_VAR_STRING:
-    case MYSQL_TYPE_TINY_BLOB:
-    case MYSQL_TYPE_MEDIUM_BLOB:
-    case MYSQL_TYPE_LONG_BLOB:
     case MYSQL_TYPE_BLOB: {
-      if (!field->binary())
+      if (!field->binary()) {
         return TRUE;
-      else
+      } else {
         return FALSE;
+      }
     }
+    case MYSQL_TYPE_JSON:
     default:
       return FALSE;
   }
@@ -195,35 +194,6 @@ static void get_decimal_key_obj(const uchar *key_ptr,
   obj = obj_builder.obj();
 }
 
-static void get_text_key_val(const uchar *key_ptr,
-                             bson::BSONObjBuilder &obj_builder,
-                             const char *op_str, int length) {
-  obj_builder.appendStrWithNoTerminating(op_str, (const char *)key_ptr, length);
-}
-
-static void get_enum_key_val(const uchar *key_ptr,
-                             const KEY_PART_INFO *key_part, String &str_val) {
-  const uchar *new_ptr = key_ptr + key_part->store_length - key_part->length;
-
-  // enum charset must be field_charset(latin1), so this convertion is
-  // necessary. we assert content is convertable, because error will be return
-  // when insert.
-  String org_str;
-  key_part->field->val_str(&org_str, new_ptr);
-  sdb_convert_charset(org_str, str_val, &SDB_CHARSET);
-}
-
-static void get_enum_key_val(const uchar *key_ptr,
-                             const KEY_PART_INFO *key_part,
-                             bson::BSONObjBuilder &obj_builder,
-                             const char *op_str) {
-  char buf[SDB_IDX_FIELD_SIZE_MAX + 1] = {0};
-  String str_val(buf, SDB_IDX_FIELD_SIZE_MAX, key_part->field->charset());
-  get_enum_key_val(key_ptr, key_part, str_val);
-  obj_builder.appendStrWithNoTerminating(op_str, (const char *)(str_val.ptr()),
-                                         str_val.length());
-}
-
 static int get_text_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
                             const char *op_str, bson::BSONObj &obj) {
   int rc = SDB_ERR_OK;
@@ -297,21 +267,8 @@ static int get_text_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
       */
       key_field_str_buf[0] = '^';
       int cur_pos = 1;
-      if (key_part->field->real_type() == MYSQL_TYPE_ENUM ||
-          key_part->field->real_type() == MYSQL_TYPE_SET) {
-        char enum_val_buf[SDB_IDX_FIELD_SIZE_MAX] = {0};
-        String str_val((char *)enum_val_buf + cur_pos,
-                       SDB_IDX_FIELD_SIZE_MAX - cur_pos,
-                       key_part->field->charset());
-        get_enum_key_val(key_ptr, key_part, str_val);
-        if (str_val.length() > 0) {
-          memcpy(key_field_str_buf + cur_pos, str_val.ptr(), str_val.length());
-          cur_pos += str_val.length();
-        }
-      } else {
-        memcpy(key_field_str_buf + cur_pos, str->ptr(), str->length());
-        cur_pos += str->length();
-      }
+      memcpy(key_field_str_buf + cur_pos, str->ptr(), str->length());
+      cur_pos += str->length();
 
       /*replace {a:{$et:"hello"}} with {a:{$regex:"^hello( ){0,}$"}}*/
       if ('\0' == pad_char)
@@ -325,24 +282,58 @@ static int get_text_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
     /* Find next rec. after key-record, or part key where a="abcdefg" (a(10),
        key(a(5)->"abcde")) */
     else {
-      if (key_part->field->real_type() == MYSQL_TYPE_ENUM ||
-          key_part->field->real_type() == MYSQL_TYPE_SET) {
-        get_enum_key_val(key_ptr + key_start_pos, key_part, obj_builder,
-                         "$gte");
-      } else {
-        get_text_key_val((const uchar *)str->ptr(), obj_builder, "$gte",
-                         str->length());
-      }
+      obj_builder.appendStrWithNoTerminating("$gte", (const char *)str->ptr(),
+                                             str->length());
     }
   } else {
-    if (key_part->field->real_type() == MYSQL_TYPE_ENUM ||
-        key_part->field->real_type() == MYSQL_TYPE_SET) {
-      get_enum_key_val(key_ptr + key_start_pos, key_part, obj_builder, op_str);
-    } else {
-      get_text_key_val((const uchar *)str->ptr(), obj_builder, op_str,
-                       str->length());
+    obj_builder.appendStrWithNoTerminating(op_str, (const char *)str->ptr(),
+                                           str->length());
+  }
+  obj = obj_builder.obj();
+
+done:
+  return rc;
+error:
+  goto done;
+}
+
+static int get_char_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
+                            const char *op_str, bson::BSONObj &obj) {
+  int rc = SDB_ERR_OK;
+  bson::BSONObjBuilder obj_builder;
+  String str_val, conv_str;
+  String *str;
+  const uchar *new_ptr = key_ptr + key_part->store_length - key_part->length;
+
+  str = key_part->field->val_str(&str_val, new_ptr);
+  if (NULL == str) {
+    rc = SDB_ERR_INVALID_ARG;
+    goto error;
+  }
+
+  if (!my_charset_same(str->charset(), &my_charset_bin)) {
+    if (!my_charset_same(str->charset(), &SDB_CHARSET)) {
+      rc = sdb_convert_charset(*str, conv_str, &SDB_CHARSET);
+      if (rc) {
+        goto error;
+      }
+      str = &conv_str;
+    }
+
+    if (MYSQL_TYPE_STRING == key_part->field->type() ||
+        MYSQL_TYPE_VAR_STRING == key_part->field->type()) {
+      // Trailing space of CHAR/ENUM/SET condition should be stripped.
+      str->strip_sp();
     }
   }
+
+  if ((key_part->key_part_flag & HA_PART_KEY_SEG) && str->length() > 0 &&
+      0 == strcmp("$et", op_str)) {
+    op_str = "$gte";
+  }
+
+  obj_builder.appendStrWithNoTerminating(op_str, (const char *)(str->ptr()),
+                                         str->length());
   obj = obj_builder.obj();
 
 done:
@@ -447,12 +438,23 @@ static int get_key_part_value(const KEY_PART_INFO *key_part,
       get_timestamp_key_obj(key_ptr, key_part, op_str, obj);
       break;
     }
-    case MYSQL_TYPE_VARCHAR:
     case MYSQL_TYPE_STRING:
-    case MYSQL_TYPE_VAR_STRING:
-    case MYSQL_TYPE_TINY_BLOB:
-    case MYSQL_TYPE_MEDIUM_BLOB:
-    case MYSQL_TYPE_LONG_BLOB:
+    case MYSQL_TYPE_VAR_STRING: {
+      if (!key_part->field->binary()) {
+        if (!ignore_text_key) {
+          rc = get_char_key_obj(key_ptr, key_part, op_str, obj);
+          if (rc) {
+            goto error;
+          }
+        }
+      } else {
+        // TODO: process the binary
+        rc = HA_ERR_UNSUPPORTED;
+        goto error;
+      }
+      break;
+    }
+    case MYSQL_TYPE_VARCHAR:
     case MYSQL_TYPE_BLOB: {
       if (!key_part->field->binary()) {
         if (!ignore_text_key) {
@@ -468,6 +470,7 @@ static int get_key_part_value(const KEY_PART_INFO *key_part,
       }
       break;
     }
+    case MYSQL_TYPE_JSON:
     default:
       rc = HA_ERR_UNSUPPORTED;
       goto error;
