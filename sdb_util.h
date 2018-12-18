@@ -54,6 +54,4 @@ class Sdb_encryption {
   int decrypt(const String &src, String &dst);
 };
 
-extern Sdb_encryption sdb_encryption;
-
 #endif

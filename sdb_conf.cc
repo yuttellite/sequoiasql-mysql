@@ -191,7 +191,7 @@ int sdb_encrypt_password() {
     goto error;
   }
 
-  for (int i = 0; i < src_password.length(); ++i) {
+  for (uint i = 0; i < src_password.length(); ++i) {
     src_password[i] = '*';
   }
 done:
