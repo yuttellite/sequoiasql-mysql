@@ -198,26 +198,15 @@ static int get_text_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
                             const char *op_str, bson::BSONObj &obj) {
   int rc = SDB_ERR_OK;
   bson::BSONObjBuilder obj_builder;
-  const int suffix_len = 9;  // 9 == strlen( "(%c){0,}$" )
-  uchar key_field_str_buf[SDB_IDX_FIELD_SIZE_MAX + 32] = {
-      0};  // reserve 32bytes for operators and '\0'
 
   String *str = NULL;
   String org_str;
   String conv_str;
-  const char *char_ptr;
 
-  uchar pad_char = ' ';
   int key_start_pos = key_part->store_length - key_part->length;
-  int pos;
-  int new_length;
   int key_length = 0;
 
-#define NULL_BITS 1
-
-  if (NULL == key_ptr) {
-    goto done;
-  }
+  const uint16 NULL_BITS = 1;
 
   /*if key's length is variable, remove spaces filled by mysql from the end of
     varibale key string. otherwise remove from the end of store_length.*/
@@ -231,7 +220,8 @@ static int get_text_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
   org_str.set((const char *)(key_ptr + key_start_pos), key_length,
               key_part->field->charset());
   str = &org_str;
-  if (!my_charset_same(org_str.charset(), &SDB_CHARSET)) {
+  if (!my_charset_same(org_str.charset(), &SDB_CHARSET) &&
+      !my_charset_same(org_str.charset(), &my_charset_bin)) {
     rc = sdb_convert_charset(org_str, conv_str, &SDB_CHARSET);
     if (rc) {
       goto error;
@@ -239,56 +229,13 @@ static int get_text_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
     str = &conv_str;
   }
 
-  /*we ignore the spaces end of key string which was filled by mysql.*/
-  pos = str->length() - 1;
-  char_ptr = str->ptr();
-  if (' ' == char_ptr[pos] || '\t' == char_ptr[pos] || '\0' == char_ptr[pos]) {
-    pad_char = char_ptr[pos];
-    while (pos >= 0 && pad_char == char_ptr[pos]) {
-      --pos;
-    }
-    new_length = pos + 1;
-    str->set(str->ptr(), new_length, str->charset());
+  if ((key_part->key_part_flag & HA_PART_KEY_SEG) && str->length() > 0 &&
+      0 == strcmp("$et", op_str)) {
+    op_str = "$gte";
   }
 
-  if (str->length() >= SDB_IDX_FIELD_SIZE_MAX) {
-    rc = SDB_ERR_SIZE_OVF;
-    goto error;
-  }
-
-  if (0 == strcmp("$et", op_str)) {
-    if (!(key_part->key_part_flag & HA_PART_KEY_SEG && str->length())) {
-      // TODO: it is exact match if start_key_ptr is same as end_key_ptr.
-      /*sdb is sensitive to spaces belong to end string, while mysql is not
-      sensitive so we return more results to the HA_READ_KEY_EXACT search.
-      'where a = "hello"'
-      euqal search in sdb with
-      '({a:{$regex:"^hello( ){0,}$"})'
-      */
-      key_field_str_buf[0] = '^';
-      int cur_pos = 1;
-      memcpy(key_field_str_buf + cur_pos, str->ptr(), str->length());
-      cur_pos += str->length();
-
-      /*replace {a:{$et:"hello"}} with {a:{$regex:"^hello( ){0,}$"}}*/
-      if ('\0' == pad_char)
-        pad_char = ' ';
-      snprintf((char *)key_field_str_buf + cur_pos, suffix_len, "(%c){0,}$",
-               pad_char);
-      cur_pos += suffix_len;
-      obj_builder.appendStrWithNoTerminating(
-          "$regex", (const char *)key_field_str_buf, cur_pos);
-    }
-    /* Find next rec. after key-record, or part key where a="abcdefg" (a(10),
-       key(a(5)->"abcde")) */
-    else {
-      obj_builder.appendStrWithNoTerminating("$gte", (const char *)str->ptr(),
-                                             str->length());
-    }
-  } else {
-    obj_builder.appendStrWithNoTerminating(op_str, (const char *)str->ptr(),
-                                           str->length());
-  }
+  obj_builder.appendStrWithNoTerminating(op_str, (const char *)(str->ptr()),
+                                         str->length());
   obj = obj_builder.obj();
 
 done:

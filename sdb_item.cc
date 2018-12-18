@@ -1143,9 +1143,7 @@ int Sdb_func_like::to_bson(bson::BSONObj &obj) {
     // => {a:""}
     obj = BSON(item_field->field_name << regex_val);
   } else {
-    obj =
-        BSON(item_field->field_name << BSON("$regex" << regex_val << "$options"
-                                                     << "i"));
+    obj = BSON(item_field->field_name << BSON("$regex" << regex_val));
   }
 
 done:
