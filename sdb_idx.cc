@@ -339,9 +339,16 @@ static void get_timestamp_key_obj(const uchar *key_ptr,
   Field *field = key_part->field;
   const uchar *new_ptr = key_ptr + key_part->store_length - key_part->length;
   const uchar *old_ptr = field->ptr;
+  bool is_null = field->is_null();
+  if (is_null) {
+    field->set_notnull();
+  }
   field->ptr = (uchar *)new_ptr;
   field->get_timestamp(&tm, &warnings);
   field->ptr = (uchar *)old_ptr;
+  if (is_null) {
+    field->set_null();
+  }
   obj_builder.appendTimestamp(op_str, tm.tv_sec * 1000, tm.tv_usec);
   obj = obj_builder.obj();
 }
