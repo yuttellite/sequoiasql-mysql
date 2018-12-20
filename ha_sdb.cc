@@ -65,6 +65,7 @@ using namespace sdbclient;
   ", BuildTime: " __DATE__ " " __TIME__
 
 #define SDB_OID_LEN 12
+#define SDB_OID_FIELD "_id"
 #define SDB_FIELD_MAX_LEN (16 * 1024 * 1024)
 
 const static char *sdb_plugin_info = SDB_ENGINE_INFO ". " SDB_VERSION_INFO ".";
@@ -1778,9 +1779,15 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
     Field *field = *fields;
 
     if (field->key_length() >= SDB_FIELD_MAX_LEN) {
-      SDB_PRINT_ERROR(ER_TOO_BIG_FIELDLENGTH, ER(ER_TOO_BIG_FIELDLENGTH),
-                      field->field_name, static_cast<ulong>(SDB_FIELD_MAX_LEN));
+      my_error(ER_TOO_BIG_FIELDLENGTH, MYF(0), field->field_name,
+               static_cast<ulong>(SDB_FIELD_MAX_LEN));
       rc = ER_TOO_BIG_FIELDLENGTH;
+      goto error;
+    }
+
+    if (strcasecmp(field->field_name, SDB_OID_FIELD) == 0) {
+      my_error(ER_WRONG_COLUMN_NAME, MYF(0), field->field_name);
+      rc = ER_WRONG_COLUMN_NAME;
       goto error;
     }
 
