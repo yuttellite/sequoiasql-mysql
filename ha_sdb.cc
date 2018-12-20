@@ -281,8 +281,8 @@ int ha_sdb::reset() {
   return 0;
 }
 
-int ha_sdb::row_to_obj(uchar *buf, bson::BSONObj &obj, bool output_null,
-                       bson::BSONObj &null_obj) {
+int ha_sdb::row_to_obj(uchar *buf, bson::BSONObj &obj, bool gen_oid,
+                       bool output_null, bson::BSONObj &null_obj) {
   int rc = 0;
   bson::BSONObjBuilder obj_builder;
   bson::BSONObjBuilder null_obj_builder;
@@ -290,6 +290,12 @@ int ha_sdb::row_to_obj(uchar *buf, bson::BSONObj &obj, bool output_null,
   my_bitmap_map *org_bitmap = dbug_tmp_use_all_columns(table, table->read_set);
   if (buf != table->record[0]) {
     repoint_field_to_record(table, table->record[0], buf);
+  }
+
+  if (gen_oid) {
+    // Generate and assign an OID for the _id field.
+    // _id should be the first element for good performance.
+    obj_builder.genOID();
   }
 
   for (Field **field = table->field; *field; field++) {
@@ -592,7 +598,7 @@ int ha_sdb::write_row(uchar *buf) {
   DBUG_ASSERT(NULL != collection);
   DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
 
-  rc = row_to_obj(buf, obj, FALSE, tmp_obj);
+  rc = row_to_obj(buf, obj, TRUE, FALSE, tmp_obj);
   if (rc != 0) {
     goto error;
   }

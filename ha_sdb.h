@@ -270,7 +270,7 @@ class ha_sdb : public handler {
 
   int obj_to_row(bson::BSONObj &obj, uchar *buf);
 
-  int row_to_obj(uchar *buf, bson::BSONObj &obj, bool output_null,
+  int row_to_obj(uchar *buf, bson::BSONObj &obj, bool gen_oid, bool output_null,
                  bson::BSONObj &null_obj);
 
   int field_to_obj(Field *field, bson::BSONObjBuilder &obj_builder);
