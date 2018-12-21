@@ -33,6 +33,9 @@
     }                                                    \
   } while (0)
 
+static const uint MAX_TIME_DEC = 6;
+static const uint POWER_10[7] = {1, 10, 100, 1000, 10000, 100000, 1000000};
+
 // This function is similar to Item::get_date_from_string() but without warning.
 static bool get_date_from_item_string(Item *item, MYSQL_TIME *ltime,
                                       my_time_flags_t flags) {
@@ -437,6 +440,11 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
         rc = SDB_ERR_COND_UNEXPECTED_ITEM;
         goto error;
       } else {
+        uint dec = field->decimals();
+        if (dec < 6) {
+          uint power = POWER_10[MAX_TIME_DEC - dec];
+          tm.tv_usec = (tm.tv_usec / power) * power;
+        }
         bson::OpTime t(tm.tv_sec, tm.tv_usec);
         long long time_val = t.asDate();
         if (NULL == arr_builder) {
@@ -476,11 +484,17 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
       MYSQL_TIME ltime;
       if (STRING_RESULT == item_val->result_type() &&
           !get_time_from_item_string(item_val, &ltime)) {
+        uint dec = field->decimals();
         double time = ltime.hour;
         time = time * 100 + ltime.minute;
         time = time * 100 + ltime.second;
-        if (ltime.second_part) {
-          double ms = ltime.second_part / (double)1000000;
+        if (ltime.second_part && dec > 0) {
+          ulong second_part = ltime.second_part;
+          if (dec < 6) {
+            uint power = POWER_10[MAX_TIME_DEC - dec];
+            second_part = (second_part / power) * power;
+          }
+          double ms = second_part / (double)1000000;
           time += ms;
         }
         if (ltime.neg) {
