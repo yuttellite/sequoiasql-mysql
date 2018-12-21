@@ -127,20 +127,24 @@ error:
 int sdb_get_idx_order(KEY *key_info, bson::BSONObj &order,
                       int order_direction) {
   int rc = SDB_ERR_OK;
-
-  DBUG_ASSERT(NULL != key_info);
-
-  if (order_direction < 0) {
-    bson::BSONObjBuilder obj_builder;
-    const KEY_PART_INFO *key_part = key_info->key_part;
-    const KEY_PART_INFO *key_end = key_part + key_info->user_defined_key_parts;
-    for (; key_part != key_end; ++key_part) {
-      obj_builder.append(key_part->field->field_name, order_direction);
-    }
-    order = obj_builder.obj();
+  const KEY_PART_INFO *keyPart;
+  const KEY_PART_INFO *keyEnd;
+  bson::BSONObjBuilder obj_builder;
+  if (!key_info) {
+    rc = SDB_ERR_INVALID_ARG;
+    goto error;
   }
+  keyPart = key_info->key_part;
+  keyEnd = keyPart + key_info->user_defined_key_parts;
+  for (; keyPart != keyEnd; ++keyPart) {
+    obj_builder.append(keyPart->field->field_name, order_direction);
+  }
+  order = obj_builder.obj();
 
+done:
   return rc;
+error:
+  goto done;
 }
 
 static void get_int_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
