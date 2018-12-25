@@ -932,10 +932,20 @@ int Sdb_func_cmp::to_bson(bson::BSONObj &obj) {
   }
 
   if (cmp_with_field) {
-    if (item_field->field->type() == MYSQL_TYPE_JSON ||
-        ((Item_field *)item_val)->field->type() == MYSQL_TYPE_JSON) {
+    enum_field_types l_type = item_field->field->type();
+    enum_field_types r_type = ((Item_field *)item_val)->field->type();
+
+    if (MYSQL_TYPE_JSON == l_type || MYSQL_TYPE_JSON == r_type) {
       rc = SDB_ERR_COND_PART_UNSUPPORTED;
       goto error;
+    }
+
+    if (l_type != r_type) {
+      // floating-point values in different types can't compare
+      if (sdb_field_is_floating(l_type) && sdb_field_is_floating(r_type)) {
+        rc = SDB_ERR_COND_PART_UNSUPPORTED;
+        goto error;
+      }
     }
 
     obj = BSON(item_field->field_name

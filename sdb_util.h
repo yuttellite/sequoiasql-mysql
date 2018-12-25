@@ -31,6 +31,8 @@ int sdb_get_db_name_from_path(const char *path, char *db_name,
 int sdb_convert_charset(const String &src_str, String &dst_str,
                         const CHARSET_INFO *dst_charset);
 
+bool sdb_field_is_floating(enum_field_types type);
+
 class Sdb_mutex_guard {
   native_mutex_t &m_mutex;
 

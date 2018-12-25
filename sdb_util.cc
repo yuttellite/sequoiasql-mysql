@@ -126,6 +126,18 @@ error:
   goto done;
 }
 
+bool sdb_field_is_floating(enum_field_types type) {
+  switch (type) {
+    case MYSQL_TYPE_DOUBLE:
+    case MYSQL_TYPE_NEWDECIMAL:
+    case MYSQL_TYPE_DECIMAL:
+    case MYSQL_TYPE_FLOAT:
+      return true;
+    default:
+      return false;
+  }
+}
+
 Sdb_encryption::Sdb_encryption() {
   my_rand_buffer(m_key, KEY_LEN);
 }
