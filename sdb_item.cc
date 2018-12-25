@@ -327,31 +327,39 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
           // pass through
         }
         case DECIMAL_RESULT: {
-          bson::bsonDecimal decimal;
-          char buff[MAX_FIELD_WIDTH] = {0};
-          String str(buff, sizeof(buff), item_val->charset_for_protocol());
-          String conv_str;
-          String *pStr;
-          pStr = item_val->val_str(&str);
-          if (NULL == pStr) {
-            rc = SDB_ERR_INVALID_ARG;
-            goto error;
-          }
-          if (!my_charset_same(pStr->charset(), &SDB_CHARSET)) {
-            rc = sdb_convert_charset(*pStr, conv_str, &SDB_CHARSET);
-            if (rc) {
+          if (MYSQL_TYPE_FLOAT == field->type()) {
+            float value = (float)item_val->val_real();
+            BSON_APPEND(field_name, value, obj, arr_builder);
+          } else if (MYSQL_TYPE_DOUBLE == field->type()) {
+            double value = item_val->val_real();
+            BSON_APPEND(field_name, value, obj, arr_builder);
+          } else {
+            bson::bsonDecimal decimal;
+            char buff[MAX_FIELD_WIDTH] = {0};
+            String str(buff, sizeof(buff), item_val->charset_for_protocol());
+            String conv_str;
+            String *pStr;
+            pStr = item_val->val_str(&str);
+            if (NULL == pStr) {
+              rc = SDB_ERR_INVALID_ARG;
               goto error;
             }
-            pStr = &conv_str;
-          }
+            if (!my_charset_same(pStr->charset(), &SDB_CHARSET)) {
+              rc = sdb_convert_charset(*pStr, conv_str, &SDB_CHARSET);
+              if (rc) {
+                goto error;
+              }
+              pStr = &conv_str;
+            }
 
-          rc = decimal.fromString(pStr->c_ptr());
-          if (0 != rc) {
-            rc = SDB_ERR_INVALID_ARG;
-            goto error;
-          }
+            rc = decimal.fromString(pStr->c_ptr());
+            if (0 != rc) {
+              rc = SDB_ERR_INVALID_ARG;
+              goto error;
+            }
 
-          BSON_APPEND(field_name, decimal, obj, arr_builder);
+            BSON_APPEND(field_name, decimal, obj, arr_builder);
+          }
           break;
         }
         default: {
