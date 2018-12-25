@@ -234,6 +234,11 @@ static int get_text_key_obj(const uchar *key_ptr, const KEY_PART_INFO *key_part,
     op_str = "$gte";
   }
 
+  // strip trailing space for some special collates
+  if (0 == strcmp("$gte", op_str)) {
+    str->strip_sp();
+  }
+
   obj_builder.appendStrWithNoTerminating(op_str, (const char *)(str->ptr()),
                                          str->length());
   obj = obj_builder.obj();
