@@ -1968,9 +1968,9 @@ int ha_sdb::get_query_flag(const uint sql_command,
     3. SELECT ... LOCK IN SHARE MODE
   */
   int query_flag = QUERY_WITH_RETURNDATA;
-  if (lock_type >= TL_WRITE_CONCURRENT_INSERT &&
+  if ((lock_type >= TL_WRITE_CONCURRENT_INSERT &&
           (SQLCOM_UPDATE == sql_command || SQLCOM_DELETE == sql_command ||
-           SQLCOM_SELECT == sql_command) ||
+           SQLCOM_SELECT == sql_command)) ||
       TL_READ_WITH_SHARED_LOCKS == lock_type) {
     query_flag |= QUERY_FOR_UPDATE;
   }

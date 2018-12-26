@@ -50,12 +50,12 @@ int sdb_encrypt_password();
 int sdb_get_password(String &res);
 
 extern char *sdb_conn_str;
+extern char *sdb_user;
 extern my_bool sdb_use_partition;
 extern my_bool sdb_use_bulk_insert;
 extern int sdb_bulk_insert_size;
 extern my_bool sdb_use_autocommit;
 extern my_bool sdb_debug_log;
-extern char *sdb_user;
 extern st_mysql_sys_var *sdb_sys_vars[];
 
 #endif
