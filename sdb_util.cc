@@ -138,6 +138,23 @@ bool sdb_field_is_floating(enum_field_types type) {
   }
 }
 
+bool sdb_field_is_date_time(enum_field_types type) {
+  switch (type) {
+    case MYSQL_TYPE_NEWDATE:
+    case MYSQL_TYPE_DATE:
+    case MYSQL_TYPE_TIMESTAMP2:
+    case MYSQL_TYPE_TIMESTAMP:
+    case MYSQL_TYPE_DATETIME2:
+    case MYSQL_TYPE_DATETIME:
+    case MYSQL_TYPE_TIME2:
+    case MYSQL_TYPE_TIME:
+    case MYSQL_TYPE_YEAR:
+      return true;
+    default:
+      return false;
+  }
+}
+
 Sdb_encryption::Sdb_encryption() {
   my_rand_buffer(m_key, KEY_LEN);
 }

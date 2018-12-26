@@ -946,6 +946,12 @@ int Sdb_func_cmp::to_bson(bson::BSONObj &obj) {
         rc = SDB_ERR_COND_PART_UNSUPPORTED;
         goto error;
       }
+
+      // date and time types can't compare
+      if (sdb_field_is_date_time(l_type) || sdb_field_is_date_time(r_type)) {
+        rc = SDB_ERR_COND_PART_UNSUPPORTED;
+        goto error;
+      }
     }
 
     obj = BSON(item_field->field_name

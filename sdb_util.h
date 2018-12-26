@@ -33,6 +33,8 @@ int sdb_convert_charset(const String &src_str, String &dst_str,
 
 bool sdb_field_is_floating(enum_field_types type);
 
+bool sdb_field_is_date_time(enum_field_types type);
+
 class Sdb_mutex_guard {
   native_mutex_t &m_mutex;
 
