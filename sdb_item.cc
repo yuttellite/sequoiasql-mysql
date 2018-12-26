@@ -327,11 +327,20 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
           // pass through
         }
         case DECIMAL_RESULT: {
+          // ignore all error and warning states
+          Dummy_error_handler error_handler;
+
           if (MYSQL_TYPE_FLOAT == field->type()) {
+            THD *thd = current_thd;
+            thd->push_internal_handler(&error_handler);
             float value = (float)item_val->val_real();
+            thd->pop_internal_handler();
             BSON_APPEND(field_name, value, obj, arr_builder);
           } else if (MYSQL_TYPE_DOUBLE == field->type()) {
+            THD *thd = current_thd;
+            thd->push_internal_handler(&error_handler);
             double value = item_val->val_real();
+            thd->pop_internal_handler();
             BSON_APPEND(field_name, value, obj, arr_builder);
           } else {
             bson::bsonDecimal decimal;
