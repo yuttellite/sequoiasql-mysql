@@ -564,6 +564,7 @@ my_bool ha_sdb::get_cond_from_key(const KEY *unique_key, bson::BSONObj &cond) {
     goto error;
   }
   cond = builder.obj();
+  rc = false;
 
 done:
   return rc;
