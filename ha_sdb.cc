@@ -161,9 +161,11 @@ ha_sdb::ha_sdb(handlerton *hton, TABLE_SHARE *table_arg)
 }
 
 ha_sdb::~ha_sdb() {
-  m_bulk_insert_rows.clear();
   free_root(&blobroot, MYF(0));
-  DBUG_ASSERT(NULL == collection);
+  if (NULL != collection) {
+    delete collection;
+    collection = NULL;
+  }
 }
 
 const char **ha_sdb::bas_ext() const {
@@ -269,6 +271,8 @@ int ha_sdb::close(void) {
     free_sdb_share(share);
     share = NULL;
   }
+  m_bulk_insert_rows.clear();
+  m_bson_element_cache.release();
   return 0;
 }
 
@@ -277,9 +281,11 @@ int ha_sdb::reset() {
     delete collection;
     collection = NULL;
   }
+  // don't release bson element cache, so that we can reuse it
+  m_bulk_insert_rows.clear();
+  free_root(&blobroot, MYF(0));
   m_lock_type = TL_IGNORE;
   pushed_condition = SDB_EMPTY_BSON;
-  free_root(&blobroot, MYF(0));
   return 0;
 }
 
@@ -1007,7 +1013,7 @@ int ha_sdb::rnd_end() {
 }
 
 int ha_sdb::obj_to_row(bson::BSONObj &obj, uchar *buf) {
-  int rc = 0;
+  int rc = SDB_ERR_OK;
   THD *thd = table->in_use;
   my_bool is_select = (SQLCOM_SELECT == thd_sql_command(thd));
   memset(buf, 0, table->s->null_bytes);
@@ -1023,116 +1029,59 @@ int ha_sdb::obj_to_row(bson::BSONObj &obj, uchar *buf) {
   /* Avoid asserts in ::store() for columns that are not going to be updated */
   my_bitmap_map *org_bitmap = dbug_tmp_use_all_columns(table, table->write_set);
 
+  bson::BSONObjIterator iter(obj);
+
+  rc = m_bson_element_cache.ensure(table->s->fields);
+  if (SDB_ERR_OK != rc) {
+    goto error;
+  }
+
   for (Field **fields = table->field; *fields; fields++) {
     Field *field = *fields;
+    bson::BSONElement elem;
 
     // we only skip non included fields when SELECT.
     if (is_select && !bitmap_is_set(table->read_set, field->field_index)) {
       continue;
     }
 
+    if (!m_bson_element_cache[field->field_index].eoo()) {
+      elem = m_bson_element_cache[field->field_index];
+    } else {
+      while (iter.more()) {
+        bson::BSONElement elem_tmp = iter.next();
+        if (strcmp(elem_tmp.fieldName(), field->field_name) == 0) {
+          // current element match the field
+          elem = elem_tmp;
+          break;
+        }
+
+        if (strcmp(elem_tmp.fieldName(), SDB_OID_FIELD) == 0) {
+          // ignore _id
+          continue;
+        }
+
+        // find matched field to store the element
+        for (Field **next_fields = fields + 1; *next_fields; next_fields++) {
+          Field *next_field = *next_fields;
+          if (strcmp(elem_tmp.fieldName(), next_field->field_name) == 0) {
+            m_bson_element_cache[next_field->field_index] = elem_tmp;
+            break;
+          }
+        }
+      }
+    }
+
     field->reset();
 
-    bson::BSONElement elem;
-    elem = obj.getField(field->field_name);
     if (elem.eoo() || elem.isNull() || bson::Undefined == elem.type()) {
       field->set_null();
       continue;
     }
 
-    switch (elem.type()) {
-      case bson::NumberInt:
-      case bson::NumberLong: {
-        longlong nr = elem.numberLong();
-        field->store(nr, false);
-        break;
-      }
-      case bson::NumberDouble: {
-        double nr = elem.numberDouble();
-        field->store(nr);
-        break;
-      }
-      case bson::BinData: {
-        int lenTmp = 0;
-        const char *dataTmp = elem.binData(lenTmp);
-        if (MYSQL_TYPE_JSON != field->type()) {
-          field->store(dataTmp, lenTmp, &my_charset_bin);
-        } else {
-          Field_json *field_json = dynamic_cast<Field_json *>(field);
-          json_binary::Value v = json_binary::parse_binary(dataTmp, lenTmp);
-          Json_wrapper wr(v);
-          field_json->store_json(&wr);
-        }
-        break;
-      }
-      case bson::String: {
-        // datetime is stored as string
-        field->store(elem.valuestr(), elem.valuestrsize() - 1, &SDB_CHARSET);
-        break;
-      }
-      case bson::NumberDecimal: {
-        bson::bsonDecimal valTmp = elem.numberDecimal();
-        string strValTmp = valTmp.toString();
-        field->store(strValTmp.c_str(), strValTmp.length(), &my_charset_bin);
-        break;
-      }
-      case bson::Date: {
-        MYSQL_TIME time_val;
-        struct timeval tv;
-        struct tm tm_val;
-
-        longlong millisec = (longlong)(elem.date());
-        tv.tv_sec = millisec / 1000;
-        tv.tv_usec = millisec % 1000 * 1000;
-        localtime_r((const time_t *)(&tv.tv_sec), &tm_val);
-
-        time_val.year = tm_val.tm_year + 1900;
-        time_val.month = tm_val.tm_mon + 1;
-        time_val.day = tm_val.tm_mday;
-        time_val.hour = 0;
-        time_val.minute = 0;
-        time_val.second = 0;
-        time_val.second_part = 0;
-        time_val.neg = 0;
-        time_val.time_type = MYSQL_TIMESTAMP_DATE;
-        if ((time_val.month < 1 || time_val.day < 1) ||
-            (time_val.year > 9999 || time_val.month > 12 ||
-             time_val.day > 31)) {
-          // Invalid date, the field has been reset to zero,
-          // so no need to store.
-        } else {
-          field->store_time(&time_val, 0);
-        }
-        break;
-      }
-      case bson::Timestamp: {
-        struct timeval tv;
-        longlong millisec = (longlong)(elem.timestampTime());
-        longlong microsec = elem.timestampInc();
-        tv.tv_sec = millisec / 1000;
-        tv.tv_usec = millisec % 1000 * 1000 + microsec;
-        field->store_timestamp(&tv);
-        break;
-      }
-      case bson::Object:
-      case bson::Bool:
-      default:
-        rc = SDB_ERR_TYPE_UNSUPPORTED;
-        goto error;
-    }
-    if (field->flags & BLOB_FLAG) {
-      Field_blob *blob = (Field_blob *)field;
-      uchar *src, *dst;
-      uint length, packlength;
-
-      packlength = blob->pack_length_no_ptr();
-      length = blob->get_length(blob->ptr);
-      memcpy(&src, blob->ptr + packlength, sizeof(char *));
-      if (src) {
-        dst = (uchar *)alloc_root(&blobroot, length);
-        memmove(dst, src, length);
-        memcpy(blob->ptr + packlength, &dst, sizeof(char *));
-      }
+    rc = bson_element_to_field(elem, field);
+    if (0 != rc) {
+      goto error;
     }
   }
 
@@ -1140,6 +1089,111 @@ done:
   dbug_tmp_restore_column_map(table->write_set, org_bitmap);
   thd->count_cuted_fields = old_check_fields;
   thd->variables.sql_mode = old_sql_mode;
+  return rc;
+error:
+  goto done;
+}
+
+int ha_sdb::bson_element_to_field(const bson::BSONElement elem, Field *field) {
+  int rc = SDB_ERR_OK;
+
+  DBUG_ASSERT(0 == strcmp(elem.fieldName(), field->field_name));
+
+  switch (elem.type()) {
+    case bson::NumberInt:
+    case bson::NumberLong: {
+      longlong nr = elem.numberLong();
+      field->store(nr, false);
+      break;
+    }
+    case bson::NumberDouble: {
+      double nr = elem.numberDouble();
+      field->store(nr);
+      break;
+    }
+    case bson::BinData: {
+      int lenTmp = 0;
+      const char *dataTmp = elem.binData(lenTmp);
+      if (MYSQL_TYPE_JSON != field->type()) {
+        field->store(dataTmp, lenTmp, &my_charset_bin);
+      } else {
+        Field_json *field_json = dynamic_cast<Field_json *>(field);
+        json_binary::Value v = json_binary::parse_binary(dataTmp, lenTmp);
+        Json_wrapper wr(v);
+        field_json->store_json(&wr);
+      }
+      break;
+    }
+    case bson::String: {
+      // datetime is stored as string
+      field->store(elem.valuestr(), elem.valuestrsize() - 1, &SDB_CHARSET);
+      break;
+    }
+    case bson::NumberDecimal: {
+      bson::bsonDecimal valTmp = elem.numberDecimal();
+      string strValTmp = valTmp.toString();
+      field->store(strValTmp.c_str(), strValTmp.length(), &my_charset_bin);
+      break;
+    }
+    case bson::Date: {
+      MYSQL_TIME time_val;
+      struct timeval tv;
+      struct tm tm_val;
+
+      longlong millisec = (longlong)(elem.date());
+      tv.tv_sec = millisec / 1000;
+      tv.tv_usec = millisec % 1000 * 1000;
+      localtime_r((const time_t *)(&tv.tv_sec), &tm_val);
+
+      time_val.year = tm_val.tm_year + 1900;
+      time_val.month = tm_val.tm_mon + 1;
+      time_val.day = tm_val.tm_mday;
+      time_val.hour = 0;
+      time_val.minute = 0;
+      time_val.second = 0;
+      time_val.second_part = 0;
+      time_val.neg = 0;
+      time_val.time_type = MYSQL_TIMESTAMP_DATE;
+      if ((time_val.month < 1 || time_val.day < 1) ||
+          (time_val.year > 9999 || time_val.month > 12 || time_val.day > 31)) {
+        // Invalid date, the field has been reset to zero,
+        // so no need to store.
+      } else {
+        field->store_time(&time_val, 0);
+      }
+      break;
+    }
+    case bson::Timestamp: {
+      struct timeval tv;
+      longlong millisec = (longlong)(elem.timestampTime());
+      longlong microsec = elem.timestampInc();
+      tv.tv_sec = millisec / 1000;
+      tv.tv_usec = millisec % 1000 * 1000 + microsec;
+      field->store_timestamp(&tv);
+      break;
+    }
+    case bson::Object:
+    case bson::Bool:
+    default:
+      rc = SDB_ERR_TYPE_UNSUPPORTED;
+      goto error;
+  }
+  if (field->flags & BLOB_FLAG) {
+    Field_blob *blob = (Field_blob *)field;
+    uchar *src, *dst;
+    uint length, packlength;
+
+    packlength = blob->pack_length_no_ptr();
+    length = blob->get_length(blob->ptr);
+    memcpy(&src, blob->ptr + packlength, sizeof(char *));
+    if (src) {
+      dst = (uchar *)alloc_root(&blobroot, length);
+      memmove(dst, src, length);
+      memcpy(blob->ptr + packlength, &dst, sizeof(char *));
+    }
+  }
+
+done:
   return rc;
 error:
   goto done;
@@ -1970,8 +2024,8 @@ int ha_sdb::get_query_flag(const uint sql_command,
   */
   int query_flag = QUERY_WITH_RETURNDATA;
   if ((lock_type >= TL_WRITE_CONCURRENT_INSERT &&
-          (SQLCOM_UPDATE == sql_command || SQLCOM_DELETE == sql_command ||
-           SQLCOM_SELECT == sql_command)) ||
+       (SQLCOM_UPDATE == sql_command || SQLCOM_DELETE == sql_command ||
+        SQLCOM_SELECT == sql_command)) ||
       TL_READ_WITH_SHARED_LOCKS == lock_type) {
     query_flag |= QUERY_FOR_UPDATE;
   }

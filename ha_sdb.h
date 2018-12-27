@@ -19,6 +19,7 @@
 #include <vector>
 #include "sdb_def.h"
 #include "sdb_cl.h"
+#include "sdb_util.h"
 
 struct Sdb_share {
   char *table_name;
@@ -270,6 +271,8 @@ class ha_sdb : public handler {
 
   int obj_to_row(bson::BSONObj &obj, uchar *buf);
 
+  int bson_element_to_field(const bson::BSONElement elem, Field *field);
+
   int row_to_obj(uchar *buf, bson::BSONObj &obj, bool gen_oid, bool output_null,
                  bson::BSONObj &null_obj);
 
@@ -317,4 +320,5 @@ class ha_sdb : public handler {
   int idx_order_direction;
   bool m_use_bulk_insert;
   std::vector<bson::BSONObj> m_bulk_insert_rows;
+  Sdb_obj_cache<bson::BSONElement> m_bson_element_cache;
 };

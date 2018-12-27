@@ -19,6 +19,8 @@
 #include <sql_class.h>
 #include <thr_mutex.h>
 #include <my_aes.h>
+#include <client.hpp>
+#include "sdb_errcode.h"
 
 #define SDB_MIN(x, y) (((x) < (y)) ? (x) : (y))
 
@@ -57,5 +59,72 @@ class Sdb_encryption {
   int encrypt(const String &src, String &dst);
   int decrypt(const String &src, String &dst);
 };
+
+template <class T>
+class Sdb_obj_cache {
+ public:
+  Sdb_obj_cache();
+  ~Sdb_obj_cache();
+
+  int ensure(uint size);
+  void release();
+
+  inline const T &operator[](int i) const {
+    DBUG_ASSERT(i >= 0 && i < (int)m_cache_size);
+    return m_cache[i];
+  }
+
+  inline T &operator[](int i) {
+    DBUG_ASSERT(i >= 0 && i < (int)m_cache_size);
+    return m_cache[i];
+  }
+
+ private:
+  T *m_cache;
+  uint m_cache_size;
+};
+
+template <class T>
+Sdb_obj_cache<T>::Sdb_obj_cache() {
+  m_cache = NULL;
+  m_cache_size = 0;
+}
+
+template <class T>
+Sdb_obj_cache<T>::~Sdb_obj_cache() {
+  release();
+}
+
+template <class T>
+int Sdb_obj_cache<T>::ensure(uint size) {
+  DBUG_ASSERT(size > 0);
+
+  if (size <= m_cache_size) {
+    // reset all objects to be used
+    for (uint i = 0; i < size; i++) {
+      m_cache[i] = T();
+    }
+    return SDB_ERR_OK;
+  }
+
+  release();
+
+  m_cache = new (std::nothrow) T[size];
+  if (NULL == m_cache) {
+    return ER_OUTOFMEMORY;
+  }
+  m_cache_size = size;
+
+  return SDB_ERR_OK;
+}
+
+template <class T>
+void Sdb_obj_cache<T>::release() {
+  if (NULL != m_cache) {
+    delete[] m_cache;
+    m_cache = NULL;
+    m_cache_size = 0;
+  }
+}
 
 #endif
