@@ -111,7 +111,7 @@ int Sdb_obj_cache<T>::ensure(uint size) {
 
   m_cache = new (std::nothrow) T[size];
   if (NULL == m_cache) {
-    return ER_OUTOFMEMORY;
+    return HA_ERR_OUT_OF_MEM;
   }
   m_cache_size = size;
 

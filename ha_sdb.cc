@@ -224,7 +224,7 @@ int ha_sdb::open(const char *name, int mode, uint test_if_locked) {
   Sdb_cl cl;
 
   if (!(share = get_sdb_share(name, table))) {
-    rc = SDB_ERR_OOM;
+    rc = HA_ERR_OUT_OF_MEM;
     goto error;
   }
 
@@ -1397,7 +1397,7 @@ int ha_sdb::ensure_collection(THD *thd) {
 
     collection = new (std::nothrow) Sdb_cl();
     if (NULL == collection) {
-      rc = SDB_ERR_OOM;
+      rc = HA_ERR_OUT_OF_MEM;
       goto error;
     }
 

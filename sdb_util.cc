@@ -110,7 +110,7 @@ int sdb_convert_charset(const String &src_str, String &dst_str,
   uint conv_errors = 0;
   if (dst_str.copy(src_str.ptr(), src_str.length(), src_str.charset(),
                    dst_charset, &conv_errors)) {
-    rc = SDB_ERR_OOM;
+    rc = HA_ERR_OUT_OF_MEM;
     goto error;
   }
   if (conv_errors) {
@@ -165,7 +165,7 @@ int Sdb_encryption::encrypt(const String &src, String &dst) {
   int dst_len = my_aes_get_size(src.length(), AES_OPMODE);
 
   if (dst.alloc(dst_len)) {
-    rc = SDB_ERR_OOM;
+    rc = HA_ERR_OUT_OF_MEM;
     goto error;
   }
 
@@ -192,7 +192,7 @@ int Sdb_encryption::decrypt(const String &src, String &dst) {
   int real_dec_len = 0;
 
   if (dst.alloc(src.length())) {
-    rc = SDB_ERR_OOM;
+    rc = HA_ERR_OUT_OF_MEM;
     goto error;
   }
 
