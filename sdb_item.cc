@@ -389,6 +389,20 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
         char buff[MAX_FIELD_WIDTH] = {0};
         String str(buff, sizeof(buff), item_val->charset_for_protocol());
 
+        if (Item::FUNC_ITEM == item_val->type() &&
+            (strcmp("cast_as_date", ((Item_func *)item_val)->func_name()) == 0 ||
+             strcmp("cast_as_datetime", ((Item_func *)item_val)->func_name()) == 0)) {
+          rc = SDB_ERR_COND_UNEXPECTED_ITEM;
+          goto error;
+        }
+
+        if (Item::CACHE_ITEM == item_val->type() &&
+            (MYSQL_TYPE_DATE == item_val->field_type() ||
+             MYSQL_TYPE_DATETIME == item_val->field_type())) {
+          rc = SDB_ERR_COND_UNEXPECTED_ITEM;
+          goto error;
+        }
+
         pStr = item_val->val_str(&str);
         if (NULL == pStr) {
           rc = SDB_ERR_INVALID_ARG;
