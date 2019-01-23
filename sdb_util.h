@@ -1,4 +1,5 @@
-/* Copyright (c) 2018, SequoiaDB and/or its affiliates. All rights reserved.
+/* Copyright (c) 2018-2019, SequoiaDB and/or its affiliates. All rights
+  reserved.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -17,7 +18,6 @@
 #define SDB_UTIL__H
 
 #include <sql_class.h>
-#include <thr_mutex.h>
 #include <my_aes.h>
 #include <client.hpp>
 #include "sdb_errcode.h"
@@ -40,39 +40,6 @@ int sdb_convert_charset(const String &src_str, String &dst_str,
 bool sdb_field_is_floating(enum_field_types type);
 
 bool sdb_field_is_date_time(enum_field_types type);
-
-class Sdb_mutex_guard {
-  native_mutex_t &m_mutex;
-
- public:
-  Sdb_mutex_guard(native_mutex_t &mutex) : m_mutex(mutex) {
-    native_mutex_lock(&m_mutex);
-  }
-
-  ~Sdb_mutex_guard() { native_mutex_unlock(&m_mutex); }
-};
-
-class Sdb_rw_rdlock_guard {
-  native_rw_lock_t &m_rw_lock;
-
- public:
-  Sdb_rw_rdlock_guard(native_rw_lock_t &lock) : m_rw_lock(lock) {
-    native_rw_rdlock(&m_rw_lock);
-  }
-
-  ~Sdb_rw_rdlock_guard() { native_rw_unlock(&m_rw_lock); }
-};
-
-class Sdb_rw_wrlock_guard {
-  native_rw_lock_t &m_rw_lock;
-
- public:
-  Sdb_rw_wrlock_guard(native_rw_lock_t &lock) : m_rw_lock(lock) {
-    native_rw_wrlock(&m_rw_lock);
-  }
-
-  ~Sdb_rw_wrlock_guard() { native_rw_unlock(&m_rw_lock); }
-};
 
 class Sdb_encryption {
   static const uint KEY_LEN = 32;
