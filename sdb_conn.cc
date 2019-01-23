@@ -47,8 +47,11 @@ int Sdb_conn::connect() {
   if (!m_connection.isValid()) {
     m_transaction_on = false;
     Sdb_conn_addrs conn_addrs;
-    int tmp_rc = conn_addrs.parse_conn_addrs(sdb_conn_str);
-    DBUG_ASSERT(tmp_rc == 0);
+    rc = conn_addrs.parse_conn_addrs(sdb_conn_str);
+    if (SDB_ERR_OK != rc) {
+      SDB_LOG_ERROR("Failed to parse connection addresses, rc=%d", rc);
+      goto error;
+    }
 
     rc = sdb_get_password(password);
     if (SDB_ERR_OK != rc) {

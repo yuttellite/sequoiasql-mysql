@@ -34,18 +34,16 @@ int sdb_bulk_insert_size = SDB_DEFAULT_BULK_INSERT_SIZE;
 my_bool sdb_use_autocommit = SDB_DEFAULT_USE_AUTOCOMMIT;
 my_bool sdb_debug_log = SDB_DEBUG_LOG_DFT;
 
-String sdb_encoded_password;
-Sdb_encryption sdb_passwd_encryption;
+static String sdb_encoded_password;
+static Sdb_encryption sdb_passwd_encryption;
 static Sdb_rwlock sdb_password_lock;
 
 static void sdb_password_update(THD *thd, struct st_mysql_sys_var *var,
                                 void *var_ptr, const void *save) {
   Sdb_rwlock_write_guard guard(sdb_password_lock);
-  const char *arg_password = *static_cast<const char *const *>(save);
-  String src_password(arg_password, &my_charset_bin);
-  sdb_passwd_encryption.encrypt(src_password, sdb_encoded_password);
-  // for confidential, don't show the changes
-  *static_cast<const char **>(var_ptr) = sdb_password;
+  const char *new_password = *static_cast<const char *const *>(save);
+  sdb_password = const_cast<char *>(new_password);
+  sdb_encrypt_password();
 }
 
 static MYSQL_SYSVAR_STR(conn_addr, sdb_conn_str,
@@ -171,6 +169,7 @@ int Sdb_conn_addrs::get_conn_num() const {
 }
 
 int sdb_encrypt_password() {
+  static const int DISPLAY_MAX_LEN = 6;
   int rc = 0;
   String src_password(sdb_password, &my_charset_bin);
 
@@ -181,6 +180,10 @@ int sdb_encrypt_password() {
 
   for (uint i = 0; i < src_password.length(); ++i) {
     src_password[i] = '*';
+  }
+
+  if (src_password.length() > DISPLAY_MAX_LEN) {
+    src_password[DISPLAY_MAX_LEN] = 0;
   }
 done:
   return rc;

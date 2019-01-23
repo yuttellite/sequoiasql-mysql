@@ -196,7 +196,7 @@ Sdb_encryption::Sdb_encryption() {
 int Sdb_encryption::encrypt(const String &src, String &dst) {
   int rc = SDB_ERR_OK;
   int real_enc_len = 0;
-  int dst_len = my_aes_get_size(src.length() + 1, AES_OPMODE);
+  int dst_len = my_aes_get_size(src.length(), AES_OPMODE);
 
   if (dst.alloc(dst_len)) {
     rc = HA_ERR_OUT_OF_MEM;
@@ -204,7 +204,7 @@ int Sdb_encryption::encrypt(const String &src, String &dst) {
   }
 
   dst.set_charset(&my_charset_bin);
-  real_enc_len = my_aes_encrypt((unsigned char *)src.ptr(), src.length() + 1,
+  real_enc_len = my_aes_encrypt((unsigned char *)src.ptr(), src.length(),
                                 (unsigned char *)dst.c_ptr(), m_key, KEY_LEN,
                                 AES_OPMODE, NULL);
   dst.length(real_enc_len);
@@ -225,7 +225,7 @@ int Sdb_encryption::decrypt(const String &src, String &dst) {
   int rc = SDB_ERR_OK;
   int real_dec_len = 0;
 
-  if (dst.alloc(src.length())) {
+  if (dst.alloc(src.length() + 1)) {
     rc = HA_ERR_OUT_OF_MEM;
     goto error;
   }
@@ -234,13 +234,13 @@ int Sdb_encryption::decrypt(const String &src, String &dst) {
   real_dec_len = my_aes_decrypt((unsigned char *)src.ptr(), src.length(),
                                 (unsigned char *)dst.c_ptr(), m_key, KEY_LEN,
                                 AES_OPMODE, NULL);
-  dst.length(real_dec_len);
-
   if (real_dec_len < 0) {
     // Bad parameters.
     rc = SDB_ERR_INVALID_ARG;
     goto error;
   }
+  dst.length(real_dec_len);
+  dst[real_dec_len] = 0;
 
 done:
   return rc;
