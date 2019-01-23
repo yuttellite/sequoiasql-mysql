@@ -52,6 +52,28 @@ class Sdb_mutex_guard {
   ~Sdb_mutex_guard() { native_mutex_unlock(&m_mutex); }
 };
 
+class Sdb_rw_rdlock_guard {
+  native_rw_lock_t &m_rw_lock;
+
+ public:
+  Sdb_rw_rdlock_guard(native_rw_lock_t &lock) : m_rw_lock(lock) {
+    native_rw_rdlock(&m_rw_lock);
+  }
+
+  ~Sdb_rw_rdlock_guard() { native_rw_unlock(&m_rw_lock); }
+};
+
+class Sdb_rw_wrlock_guard {
+  native_rw_lock_t &m_rw_lock;
+
+ public:
+  Sdb_rw_wrlock_guard(native_rw_lock_t &lock) : m_rw_lock(lock) {
+    native_rw_wrlock(&m_rw_lock);
+  }
+
+  ~Sdb_rw_wrlock_guard() { native_rw_unlock(&m_rw_lock); }
+};
+
 class Sdb_encryption {
   static const uint KEY_LEN = 32;
   static const enum my_aes_opmode AES_OPMODE = my_aes_128_ecb;
