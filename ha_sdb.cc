@@ -1039,6 +1039,11 @@ int ha_sdb::obj_to_row(bson::BSONObj &obj, uchar *buf) {
 
   bson::BSONObjIterator iter(obj);
 
+  if (is_select && bitmap_is_clear_all(table->read_set)) {
+    // no field need to read
+    goto done;
+  }
+
   rc = m_bson_element_cache.ensure(table->s->fields);
   if (SDB_ERR_OK != rc) {
     goto error;
