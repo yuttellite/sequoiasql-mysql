@@ -245,6 +245,7 @@ class ha_sdb : public handler {
   int delete_table(const char *from);
   int rename_table(const char *from, const char *to);
   int create(const char *name, TABLE *form, HA_CREATE_INFO *create_info);
+  void update_create_info(HA_CREATE_INFO *create_info);
 
   THR_LOCK_DATA **store_lock(THD *thd, THR_LOCK_DATA **to,
                              enum thr_lock_type lock_type);
@@ -274,7 +275,7 @@ class ha_sdb : public handler {
   int bson_element_to_field(const bson::BSONElement elem, Field *field);
 
   int row_to_obj(uchar *buf, bson::BSONObj &obj, bool gen_oid, bool output_null,
-                 bson::BSONObj &null_obj);
+                 bson::BSONObj &null_obj, bool auto_inc_explicit_used);
 
   int field_to_obj(Field *field, bson::BSONObjBuilder &obj_builder);
 
@@ -303,6 +304,9 @@ class ha_sdb : public handler {
   my_bool get_cond_from_key(const KEY *unique_key, bson::BSONObj &cond);
 
   int get_query_flag(const uint sql_command, enum thr_lock_type lock_type);
+
+  void build_auto_inc_option(const Field *field, HA_CREATE_INFO *create_info,
+                             bson::BSONObj &option);
 
  private:
   THR_LOCK_DATA lock_data;

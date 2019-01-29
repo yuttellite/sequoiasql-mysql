@@ -20,7 +20,8 @@
 #include <client.hpp>
 #include "sdb_cl.h"
 
-int sdb_create_index(const KEY *keyInfo, Sdb_cl &cl);
+int sdb_create_index(const KEY *keyInfo, Sdb_cl &cl,
+                     bson::BSONObj *sharding_key = NULL);
 
 int sdb_get_idx_order(KEY *key_info, bson::BSONObj &order, int order_direction);
 

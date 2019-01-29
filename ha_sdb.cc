@@ -144,6 +144,103 @@ static int free_sdb_share(Sdb_share *share) {
   return 0;
 }
 
+static ulonglong sdb_default_autoinc_acquire_size(enum enum_field_types type) {
+  ulonglong default_value = 0;
+  switch (type) {
+    case MYSQL_TYPE_TINY:
+      default_value = 1;
+      break;
+    case MYSQL_TYPE_SHORT:
+      default_value = 10;
+      break;
+    case MYSQL_TYPE_INT24:
+      default_value = 100;
+      break;
+    case MYSQL_TYPE_LONG:
+    case MYSQL_TYPE_LONGLONG:
+      default_value = 1000;
+      break;
+    default:
+      default_value = 1000;
+      break;
+  }
+  return default_value;
+}
+
+static int sdb_autoinc_current_value(Sdb_conn &conn, ulonglong *cur_value,
+                                     const char *full_name,
+                                     const char *field_name) {
+  int rc = SDB_ERR_OK;
+  bson::BSONObj condition;
+  bson::BSONObj selected;
+  bson::BSONObj obj;
+  bson::BSONObj info;
+  bson::BSONElement elem;
+  bson::BSONElement e;
+  const char *autoinc_name = NULL;
+
+  condition = BSON(SDB_FIELD_NAME << full_name);
+  selected =
+      BSON(SDB_FIELD_NAME_AUTOINCREMENT
+           << BSON("$elemMatch" << BSON(SDB_FIELD_NAME_FIELD << field_name)));
+  rc = conn.snapshot(obj, SDB_SNAP_CATALOG, condition, selected);
+  if (0 != rc) {
+    SDB_PRINT_ERROR(rc, "Could not get snapshot.");
+    return rc;
+  }
+  elem = obj.getField(SDB_FIELD_NAME_AUTOINCREMENT);
+  if (bson::Array != elem.type()) {
+    SDB_LOG_WARNING(
+        "Invalid type: '%d' of 'AutoIncrement': '%s' in "
+        "obj: '%s'.",
+        elem.type(), field_name, obj.toString(false, false).c_str());
+    rc = SDB_ERR_COND_UNEXPECTED_ITEM;
+    return rc;
+  }
+
+  bson::BSONObjIterator it(elem.embeddedObject());
+  if (it.more()) {
+    info = it.next().Obj();
+    e = info.getField(SDB_FIELD_SEQUENCE_NAME);
+    if (bson::String != e.type()) {
+      SDB_LOG_WARNING(
+          "Invalid type: '%d' of 'SequenceName': '%s' in "
+          "obj: '%s'.",
+          e.type(), field_name, info.toString(false, false).c_str());
+      rc = SDB_ERR_COND_UNEXPECTED_ITEM;
+      goto error;
+    }
+
+    autoinc_name = e.valuestr();
+    condition = BSON(SDB_FIELD_NAME << autoinc_name);
+    selected = BSON(SDB_FIELD_CURRENT_VALUE << "");
+    rc = conn.snapshot(obj, SDB_SNAP_SEQUENCES, condition, selected);
+    if (0 != rc) {
+      SDB_PRINT_ERROR(rc, "Could not get snapshot.");
+      goto error;
+    }
+
+    elem = obj.getField(SDB_FIELD_CURRENT_VALUE);
+    if (bson::NumberInt != elem.type() && bson::NumberLong != elem.type()) {
+      SDB_LOG_WARNING("Invalid type: '%d' of 'CurrentValue' in field: '%s'.",
+                      elem.type(), field_name);
+      rc = SDB_ERR_COND_UNEXPECTED_ITEM;
+      goto error;
+    }
+    *cur_value = elem.numberLong();
+  } else {
+    SDB_LOG_WARNING("Invalid auto_increment catalog obj '%s'",
+                    obj.toString(false, false).c_str());
+    rc = SDB_ERR_COND_UNEXPECTED_ITEM;
+    goto error;
+  }
+done:
+  convert_sdb_code(rc);
+  return rc;
+error:
+  goto done;
+}
+
 ha_sdb::ha_sdb(handlerton *hton, TABLE_SHARE *table_arg)
     : handler(hton, table_arg) {
   active_index = MAX_KEY;
@@ -182,9 +279,9 @@ const char **ha_sdb::bas_ext() const {
 }
 
 ulonglong ha_sdb::table_flags() const {
-  return (HA_REC_NOT_IN_SEQ | HA_NO_AUTO_INCREMENT | HA_NO_READ_LOCAL_LOCK |
-          HA_BINLOG_ROW_CAPABLE | HA_BINLOG_STMT_CAPABLE |
-          HA_TABLE_SCAN_ON_INDEX | HA_NULL_IN_KEY | HA_CAN_INDEX_BLOBS);
+  return (HA_REC_NOT_IN_SEQ | HA_NO_READ_LOCAL_LOCK | HA_BINLOG_ROW_CAPABLE |
+          HA_BINLOG_STMT_CAPABLE | HA_TABLE_SCAN_ON_INDEX | HA_NULL_IN_KEY |
+          HA_CAN_INDEX_BLOBS);
 }
 
 ulong ha_sdb::index_flags(uint inx, uint part, bool all_parts) const {
@@ -298,7 +395,8 @@ int ha_sdb::reset() {
 }
 
 int ha_sdb::row_to_obj(uchar *buf, bson::BSONObj &obj, bool gen_oid,
-                       bool output_null, bson::BSONObj &null_obj) {
+                       bool output_null, bson::BSONObj &null_obj,
+                       bool auto_inc_explicit_used) {
   int rc = 0;
   bson::BSONObjBuilder obj_builder;
   bson::BSONObjBuilder null_obj_builder;
@@ -319,6 +417,9 @@ int ha_sdb::row_to_obj(uchar *buf, bson::BSONObj &obj, bool gen_oid,
       if (output_null) {
         null_obj_builder.append((*field)->field_name, "");
       }
+    } else if (Field::NEXT_NUMBER == (*field)->unireg_check &&
+               !auto_inc_explicit_used) {
+      continue;
     } else {
       rc = field_to_obj(*field, obj_builder);
       if (0 != rc) {
@@ -688,16 +789,27 @@ int ha_sdb::end_bulk_insert() {
 
 int ha_sdb::write_row(uchar *buf) {
   int rc = 0;
+  bson::BSONObj option;
   bson::BSONObj obj;
   bson::BSONObj tmp_obj;
+  ulonglong auto_inc = 0;
+  bool auto_inc_explicit_used = false;
   bool ignore_dup_key = ha_thd()->lex && ha_thd()->lex->is_ignore();
+  // TODO: ywx: consider detecting the change of auto_increment_increment
+  // ulonglong increment = ha_thd()->variables.auto_increment_increment;
 
   ha_statistic_increment(&SSV::ha_write_count);
 
   DBUG_ASSERT(NULL != collection);
   DBUG_ASSERT(collection->thread_id() == ha_thd()->thread_id());
 
-  rc = row_to_obj(buf, obj, TRUE, FALSE, tmp_obj);
+  if (table->next_number_field && buf == table->record[0] &&
+      ((auto_inc = table->next_number_field->val_int()) != 0 ||
+       (table->auto_increment_field_not_null &&
+        ha_thd()->variables.sql_mode & MODE_NO_AUTO_VALUE_ON_ZERO))) {
+    auto_inc_explicit_used = true;
+  }
+  rc = row_to_obj(buf, obj, TRUE, FALSE, tmp_obj, auto_inc_explicit_used);
   if (rc != 0) {
     goto error;
   }
@@ -733,6 +845,9 @@ int ha_sdb::write_row(uchar *buf) {
 done:
   return rc;
 error:
+  if (SDB_SEQUENCE_EXCEEDED == rc) {
+    rc = HA_ERR_AUTOINC_READ_FAILED;
+  }
   goto done;
 }
 
@@ -1328,11 +1443,40 @@ void ha_sdb::position(const uchar *record) {
 
 int ha_sdb::info(uint flag) {
   int rc = 0;
+  Sdb_conn *conn = NULL;
   long long rec_num = 0;
+
+  conn = check_sdb_in_thd(ha_thd(), true);
+  if (NULL == conn) {
+    SDB_PRINT_ERROR(HA_ERR_NO_CONNECTION,
+                    "Could not connect to storage engine.");
+    goto error;
+  }
+
+  DBUG_ASSERT(conn->thread_id() == ha_thd()->thread_id());
 
   rc = ensure_collection(ha_thd());
   if (0 != rc) {
     goto error;
+  }
+
+  if ((flag & HA_STATUS_AUTO) && table->found_next_number_field) {
+    DBUG_PRINT("info", ("HA_STATUS_AUTO"));
+    ulonglong auto_inc_val = 0;
+    char full_name[SDB_CL_FULL_NAME_MAX_SIZE + 2] = {0};
+    snprintf(full_name, SDB_CL_FULL_NAME_MAX_SIZE, "%s.%s", db_name,
+             table_name);
+
+    rc = sdb_autoinc_current_value(*conn, &auto_inc_val, full_name,
+                                   table->found_next_number_field->field_name);
+    if (SDB_ERR_OK != rc) {
+      sql_print_error("Error %lu in ::update_create_info(): %s.%s", (ulong)rc,
+                      db_name, table_name);
+      goto error;
+    }
+    if (auto_inc_val > 1) {
+      stats.auto_increment_value = auto_inc_val;
+    }
   }
 
   if (count_times++ % 100 == 0) {
@@ -1364,7 +1508,6 @@ int ha_sdb::info(uint flag) {
   stats.index_file_length = (rec_num * 100) + 32 * 1024 * 1024;
   stats.max_index_file_length = 10737418240LL;  // 10*1024*1024*1024
   stats.delete_length = 0;
-  stats.auto_increment_value = 0;
   stats.records = rec_num;
   stats.deleted = 0;
   stats.mean_rec_length = 1024;
@@ -1378,6 +1521,7 @@ int ha_sdb::info(uint flag) {
 done:
   return rc;
 error:
+  convert_sdb_code(rc);
   goto done;
 }
 
@@ -1529,7 +1673,8 @@ int ha_sdb::start_stmt(THD *thd, thr_lock_type lock_type) {
 enum_alter_inplace_result ha_sdb::check_if_supported_inplace_alter(
     TABLE *altered_table, Alter_inplace_info *ha_alter_info) {
   enum_alter_inplace_result rs;
-  KEY *keyInfo;
+  HA_CREATE_INFO *create_info = ha_alter_info->create_info;
+  Alter_inplace_info::HA_ALTER_FLAGS alter_flags = ha_alter_info->handler_flags;
 
   Alter_inplace_info::HA_ALTER_FLAGS inplace_online_operations =
       Alter_inplace_info::ADD_INDEX | Alter_inplace_info::DROP_INDEX |
@@ -1542,9 +1687,24 @@ enum_alter_inplace_result ha_sdb::check_if_supported_inplace_alter(
       Alter_inplace_info::ALTER_STORED_COLUMN_ORDER |
       Alter_inplace_info::ALTER_STORED_COLUMN_TYPE |
       Alter_inplace_info::ALTER_COLUMN_DEFAULT |
-      Alter_inplace_info::ALTER_COLUMN_EQUAL_PACK_LENGTH;
+      Alter_inplace_info::ALTER_COLUMN_NAME |
+      Alter_inplace_info::ALTER_COLUMN_EQUAL_PACK_LENGTH |
+      Alter_inplace_info::CHANGE_CREATE_OPTION;
 
-  if (ha_alter_info->handler_flags & ~inplace_online_operations) {
+  if ((alter_flags & Alter_inplace_info::CHANGE_CREATE_OPTION) &&
+      (create_info->used_fields & HA_CREATE_USED_AUTO)) {
+    if (create_info->auto_increment_value !=
+        table->file->stats.auto_increment_value) {
+      /* Check that only auto_increment value was changed */
+      if (create_info->used_fields & ~HA_CREATE_USED_AUTO) {
+        DBUG_PRINT("info", ("Not only auto_increment value changed"));
+        rs = HA_ALTER_INPLACE_NOT_SUPPORTED;
+        goto done;
+      }
+    }
+  }
+
+  if (alter_flags & ~inplace_online_operations) {
     // include offline-operations
     // rs = handler::check_if_supported_inplace_alter(
     //                           altered_table, ha_alter_info ) ;
@@ -1552,30 +1712,29 @@ enum_alter_inplace_result ha_sdb::check_if_supported_inplace_alter(
     goto done;
   }
 
+  if (alter_flags & inplace_online_operations) {
+    rs = HA_ALTER_INPLACE_SHARED_LOCK_AFTER_PREPARE;
+    goto done;
+  }
+
+  if (alter_flags & Alter_inplace_info::CHANGE_CREATE_OPTION) {
+    rs = HA_ALTER_INPLACE_SHARED_LOCK_AFTER_PREPARE;
+    goto done;
+  }
+  /*
   keyInfo = ha_alter_info->key_info_buffer;
   for (; keyInfo < ha_alter_info->key_info_buffer + ha_alter_info->key_count;
        keyInfo++) {
     KEY_PART_INFO *keyPart;
-    KEY_PART_INFO *keyEnd;
-    /*if ( ( keyInfo->flags & HA_FULLTEXT )
-       || ( keyInfo->flags & HA_PACK_KEY )
-       || ( keyInfo->flags & HA_BINARY_PACK_KEY ))
-    {
-       rs = HA_ALTER_INPLACE_NOT_SUPPORTED ;
-       goto done ;
-    }*/
-    keyPart = keyInfo->key_part;
-    keyEnd = keyPart + keyInfo->user_defined_key_parts;
-    for (; keyPart < keyEnd; keyPart++) {
-      keyPart->field = altered_table->field[keyPart->fieldnr];
-      keyPart->null_offset = keyPart->field->null_offset();
-      keyPart->null_bit = keyPart->field->null_bit;
-      if (keyPart->field->flags & AUTO_INCREMENT_FLAG) {
-        rs = HA_ALTER_INPLACE_NOT_SUPPORTED;
-        goto done;
-      }
-    }
+    KEY_PART_INFO *keyEnd;*/
+  /*if ( ( keyInfo->flags & HA_FULLTEXT )
+     || ( keyInfo->flags & HA_PACK_KEY )
+     || ( keyInfo->flags & HA_BINARY_PACK_KEY ))
+  {
+     rs = HA_ALTER_INPLACE_NOT_SUPPORTED ;
+     goto done ;
   }
+}*/
 
   rs = HA_ALTER_INPLACE_NO_LOCK;
 done:
@@ -1608,9 +1767,16 @@ int ha_sdb::create_index(Sdb_cl &cl, Alter_inplace_info *ha_alter_info) {
   int rc = 0;
 
   for (uint i = 0; i < ha_alter_info->index_add_count; i++) {
+    bson::BSONObj sharding_key;
     keyInfo =
         &ha_alter_info->key_info_buffer[ha_alter_info->index_add_buffer[i]];
-    rc = sdb_create_index(keyInfo, cl);
+    if (!strcmp(keyInfo->name, primary_key_name)) {
+      rc = get_sharding_key(table, sharding_key);
+      if (rc) {
+        goto error;
+      }
+    }
+    rc = sdb_create_index(keyInfo, cl, &sharding_key);
     if (rc) {
       goto error;
     }
@@ -1649,6 +1815,11 @@ bool ha_sdb::inplace_alter_table(TABLE *altered_table,
   THD *thd = current_thd;
   Sdb_conn *conn = NULL;
   Sdb_cl cl;
+  HA_CREATE_INFO *create_info = ha_alter_info->create_info;
+
+  bool alter_auto_inc_col_type = false;
+  const Alter_inplace_info::HA_ALTER_FLAGS alter_flags =
+      ha_alter_info->handler_flags;
 
   Alter_inplace_info::HA_ALTER_FLAGS inplace_online_addidx =
       Alter_inplace_info::ADD_INDEX | Alter_inplace_info::ADD_UNIQUE_INDEX |
@@ -1660,13 +1831,14 @@ bool ha_sdb::inplace_alter_table(TABLE *altered_table,
       Alter_inplace_info::DROP_PK_INDEX |
       Alter_inplace_info::ALTER_COLUMN_NULLABLE;
 
-  if (ha_alter_info->handler_flags &
+  if (alter_flags &
       ~(inplace_online_addidx | inplace_online_dropidx |
         Alter_inplace_info::ADD_COLUMN | Alter_inplace_info::DROP_COLUMN |
         Alter_inplace_info::ALTER_STORED_COLUMN_ORDER |
         Alter_inplace_info::ALTER_STORED_COLUMN_TYPE |
         Alter_inplace_info::ALTER_COLUMN_DEFAULT |
-        Alter_inplace_info::ALTER_COLUMN_EQUAL_PACK_LENGTH)) {
+        Alter_inplace_info::ALTER_COLUMN_EQUAL_PACK_LENGTH |
+        Alter_inplace_info::CHANGE_CREATE_OPTION)) {
     SDB_PRINT_ERROR(HA_ERR_UNSUPPORTED,
                     "Storage engine doesn't support the operation.");
     rs = true;
@@ -1681,24 +1853,154 @@ bool ha_sdb::inplace_alter_table(TABLE *altered_table,
 
   rc = conn->get_cl(db_name, table_name, cl);
   if (0 != rc) {
-    SDB_LOG_ERROR("Collection[%s.%s] is not available. rc: %d", db_name,
-                  table_name, rc);
+    SDB_LOG_ERROR("Collection[%s.%s] is not available", db_name, table_name);
     goto error;
   }
 
-  if (ha_alter_info->handler_flags & inplace_online_dropidx) {
-    rc = drop_index(cl, ha_alter_info);
+  /*TODO: ywx: IF drop a column which was chose to be a sharding key, it cannot
+               be allowed to drop, or the following add unique/primary key may
+               fail cause unique key should include sharding key*/
+  if (alter_flags & Alter_inplace_info::DROP_STORED_COLUMN) {
+    if (table->found_next_number_field) {
+      rc = cl.drop_auto_increment(table->found_next_number_field->field_name);
+      if (0 != rc) {
+        SDB_PRINT_ERROR(rc,
+                        "Failed to drop auto_increment "
+                        "column[%s] on cl[%s.%s]",
+                        table->found_next_number_field->field_name, db_name,
+                        table_name);
+        rs = true;
+        goto error;
+      }
+    }
+  }
+
+  /* Check if an AUTO_INCREMENT column was added. */
+  if (alter_flags & Alter_inplace_info::ADD_STORED_BASE_COLUMN) {
+    uint i = 0;
+    List_iterator_fast<Create_field> cf_it(
+        ha_alter_info->alter_info->create_list);
+    while (const Create_field *new_field = cf_it++) {
+      if (Field::NEXT_NUMBER == MTYP_TYPENR(new_field->unireg_check)) {
+        uint old_i = 0;
+        const Field *field = NULL;
+        field = altered_table->field[i];
+        for (old_i = 0; old_i < table->s->fields; old_i++) {
+          if (new_field->field == table->field[old_i]) {
+            continue;
+          }
+          if (i > table->s->fields - 1 || old_i >= table->s->fields) {
+            bson::BSONObj option;
+            build_auto_inc_option(field, create_info, option);
+            rc = cl.create_auto_increment(option);
+            if (0 != rc) {
+              SDB_PRINT_ERROR(rc,
+                              "Failed to add auto_increment "
+                              "column[%s] on cl[%s.%s]",
+                              field->field_name, db_name, table_name);
+              rs = true;
+              goto error;
+            }
+            break;
+          }
+        }
+      }
+      i++;
+    }
+  }
+
+  if (alter_flags & Alter_inplace_info::ALTER_STORED_COLUMN_TYPE) {
+    if (table->found_next_number_field &&
+        alter_flags & Alter_inplace_info::ADD_PK_INDEX &&
+        alter_flags & Alter_inplace_info::DROP_PK_INDEX &&
+        alter_flags & Alter_inplace_info::ALTER_COLUMN_DEFAULT) {
+      int field_pos = 0;
+      Field *auto_inc = NULL;
+      bson::BSONObj option;
+      ulonglong default_value = 0;
+
+      alter_auto_inc_col_type = true;
+      field_pos = table->found_next_number_field->field_index;
+      auto_inc = altered_table->field[field_pos];
+      default_value = sdb_default_autoinc_acquire_size(auto_inc->type());
+      option = BSON(SDB_FIELD_NAME_FIELD
+                    << auto_inc->field_name << SDB_FIELD_MAX_VALUE
+                    << (INT64)auto_inc->get_max_int_value()
+                    << SDB_FIELD_ACQUIRE_SIZE << (int)default_value
+                    << SDB_FIELD_CACHE_SIZE << (int)default_value);
+      rc = cl.set_attributes(option);
+      if (0 != rc) {
+        SDB_PRINT_ERROR(rc,
+                        "Failed to alter auto_increment "
+                        "column[%s] on cl[%s.%s]",
+                        altered_table->field[field_pos]->field_name, db_name,
+                        table_name);
+        rs = true;
+        goto error;
+      }
+    }
+  }
+
+  if (alter_flags & Alter_inplace_info::CHANGE_CREATE_OPTION) {
+    bson::BSONObj option;
+    if (create_info->used_fields & HA_CREATE_USED_AUTO) {
+      if (create_info->auto_increment_value >
+          table->file->stats.auto_increment_value) {
+        option = BSON(SDB_FIELD_NAME_FIELD
+                      << table->found_next_number_field->field_name
+                      << SDB_FIELD_CURRENT_VALUE
+                      << (INT64)create_info->auto_increment_value);
+      }
+    }
+    rc = cl.set_attributes(option);
     if (0 != rc) {
-      SDB_PRINT_ERROR(ER_GET_ERRNO, ER(ER_GET_ERRNO), rc);
+      SDB_PRINT_ERROR(rc,
+                      "Failed to alter auto_increment option "
+                      "on cl[%s.%s]",
+                      db_name, table_name);
       rs = true;
       goto error;
     }
   }
 
-  if (ha_alter_info->handler_flags & inplace_online_addidx) {
+  if ((ha_alter_info->handler_flags & inplace_online_dropidx) &&
+      !alter_auto_inc_col_type) {
+    rc = drop_index(cl, ha_alter_info);
+    if (0 != rc) {
+      SDB_PRINT_ERROR(rc, "Failed to drop index on collection[%s.%s]", db_name,
+                      table_name);
+      rs = true;
+      goto error;
+    }
+  }
+
+  if ((ha_alter_info->handler_flags & inplace_online_addidx) &&
+      !alter_auto_inc_col_type) {
+    KEY *key_info = NULL;
+    KEY *key = NULL;
+    uint *idx_p = NULL;
+    uint *idx_end_p = NULL;
+    KEY_PART_INFO *key_part = NULL;
+    KEY_PART_INFO *part_end = NULL;
+    DBUG_PRINT("info", ("ALTER ADD INDEX"));
+    key_info = (KEY *)thd->alloc(sizeof(KEY) * ha_alter_info->index_add_count);
+    key = key_info;
+    for (idx_p = ha_alter_info->index_add_buffer,
+        idx_end_p = idx_p + ha_alter_info->index_add_count;
+         idx_p < idx_end_p; idx_p++, key++) {
+      /* Copy the KEY struct.*/
+      *key = ha_alter_info->key_info_buffer[*idx_p];
+      /* Fix the key parts. */
+      part_end = key->key_part + key->user_defined_key_parts;
+      for (key_part = key->key_part; key_part < part_end; key_part++) {
+        key_part->field = altered_table->field[key_part->fieldnr];
+      }
+    }
+
     rc = create_index(cl, ha_alter_info);
     if (0 != rc) {
-      SDB_PRINT_ERROR(ER_GET_ERRNO, ER(ER_GET_ERRNO), rc);
+      SDB_PRINT_ERROR(rc, "Failed to create index on collection[%s.%s]",
+                      db_name, table_name);
       rs = true;
       goto error;
     }
@@ -1952,10 +2254,45 @@ error:
   goto done;
 }
 
+void ha_sdb::update_create_info(HA_CREATE_INFO *create_info) {
+  /*The auto_increment_value is a input value in the case of creating table
+    with auto_increment option, no need to update it*/
+  if (!(create_info->used_fields & HA_CREATE_USED_AUTO)) {
+    table->file->info(HA_STATUS_AUTO);
+    create_info->auto_increment_value = stats.auto_increment_value;
+  }
+}
+
+void ha_sdb::build_auto_inc_option(const Field *field,
+                                   HA_CREATE_INFO *create_info,
+                                   bson::BSONObj &option) {
+  bson::BSONObjBuilder build;
+  ulonglong default_value = 0;
+  ulonglong start_value = 1;
+  struct system_variables *variables = &ha_thd()->variables;
+  ulonglong max_value = field->get_max_int_value();
+  if (create_info->auto_increment_value > 0) {
+    start_value = create_info->auto_increment_value;
+  }
+  if (start_value > max_value) {
+    start_value = max_value;
+  }
+  default_value = sdb_default_autoinc_acquire_size(field->type());
+  build.append(SDB_FIELD_NAME_FIELD, field->field_name);
+  build.append(SDB_FIELD_INCREMENT, (int)variables->auto_increment_increment);
+  build.append(SDB_FIELD_START_VALUE, (longlong)start_value);
+  build.append(SDB_FIELD_ACQUIRE_SIZE, (int)default_value);
+  build.append(SDB_FIELD_CACHE_SIZE, (int)default_value);
+  build.append(SDB_FIELD_MAX_VALUE, (longlong)field->get_max_int_value());
+
+  option = build.obj();
+}
+
 int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
   int rc = 0;
   Sdb_conn *conn = NULL;
   Sdb_cl cl;
+  bson::BSONObjBuilder build;
   bool create_temporary = (create_info->options & HA_LEX_CREATE_TMP_TABLE);
   bson::BSONObj options;
 
@@ -1975,10 +2312,10 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
       goto error;
     }
 
-    if (Field::NEXT_NUMBER == field->unireg_check) {
-      // TODO: support auto-increment field.
-      //      it is auto-increment field if run here.
-      //      the start-value is create_info->auto_increment_value
+    if (Field::NEXT_NUMBER == MTYP_TYPENR(field->unireg_check)) {
+      bson::BSONObj auto_inc_options;
+      build_auto_inc_option(field, create_info, auto_inc_options);
+      build.append(SDB_FIELD_NAME_AUTOINCREMENT, auto_inc_options);
     }
   }
 
@@ -2000,6 +2337,7 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
     goto error;
   }
 
+  build.appendElements(options);
   conn = check_sdb_in_thd(ha_thd(), true);
   if (NULL == conn) {
     rc = HA_ERR_NO_CONNECTION;
@@ -2007,7 +2345,7 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
   }
   DBUG_ASSERT(conn->thread_id() == ha_thd()->thread_id());
 
-  rc = conn->create_cl(db_name, table_name, options);
+  rc = conn->create_cl(db_name, table_name, build.obj());
   if (0 != rc) {
     goto error;
   }

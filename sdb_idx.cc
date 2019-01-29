@@ -82,7 +82,8 @@ static BOOLEAN is_field_indexable(const Field *field) {
   }
 }
 
-int sdb_create_index(const KEY *keyInfo, Sdb_cl &cl) {
+int sdb_create_index(const KEY *keyInfo, Sdb_cl &cl,
+                     bson::BSONObj *sharding_key) {
   const KEY_PART_INFO *keyPart;
   const KEY_PART_INFO *keyEnd;
   int rc = 0;
@@ -103,12 +104,17 @@ int sdb_create_index(const KEY *keyInfo, Sdb_cl &cl) {
     // TODO: ASC or DESC
     keyObjBuilder.append(keyPart->field->field_name, 1);
   }
-  keyObj = keyObjBuilder.obj();
 
+  /*primary key*/
   if (!strcmp(keyInfo->name, primary_key_name)) {
     isUnique = TRUE;
     isEnforced = TRUE;
+    if (sharding_key && !sharding_key->isEmpty()) {
+      keyObjBuilder.appendElements(*sharding_key);
+    }
   }
+
+  keyObj = keyObjBuilder.obj();
 
   if (keyInfo->flags & HA_NOSAME) {
     isUnique = TRUE;
@@ -518,7 +524,7 @@ int sdb_create_condition_from_key(TABLE *table, KEY *key_info,
               is_null = i > 0 ? 1 : 0;
               break;
             case HA_READ_KEY_OR_NEXT:
-              // >= null means read all records
+            // >= null means read all records
             default:
               goto prepare_for_next_key_part;
           }
