@@ -38,6 +38,21 @@ static String sdb_encoded_password;
 static Sdb_encryption sdb_passwd_encryption;
 static Sdb_rwlock sdb_password_lock;
 
+static int sdb_conn_addr_validate(THD *thd, struct st_mysql_sys_var *var,
+                                  void *save, struct st_mysql_value *value) {
+  // The buffer size is not important. Because st_mysql_value::val_str 
+  // internally calls the Item_string::val_str, which doesn't need a buffer.
+  static const uint SDB_CONN_ADDR_BUF_SIZE = 3072;
+  char buff[SDB_CONN_ADDR_BUF_SIZE];
+  int len = sizeof(buff);
+  const char *arg_conn_addr = value->val_str(value, buff, &len);
+
+  Sdb_conn_addrs parser;
+  int rc = parser.parse_conn_addrs(arg_conn_addr);
+  *static_cast<const char**>(save) = (0 == rc) ? arg_conn_addr : NULL;
+  return rc;
+}
+
 static void sdb_password_update(THD *thd, struct st_mysql_sys_var *var,
                                 void *var_ptr, const void *save) {
   Sdb_rwlock_write_guard guard(sdb_password_lock);
@@ -48,7 +63,7 @@ static void sdb_password_update(THD *thd, struct st_mysql_sys_var *var,
 
 static MYSQL_SYSVAR_STR(conn_addr, sdb_conn_str,
                         PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_MEMALLOC,
-                        "SequoiaDB addresses", NULL, NULL,
+                        "SequoiaDB addresses", sdb_conn_addr_validate, NULL,
                         SDB_ADDR_DFT);
 static MYSQL_SYSVAR_STR(user, sdb_user,
                         PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_MEMALLOC,
@@ -169,7 +184,7 @@ int Sdb_conn_addrs::get_conn_num() const {
 }
 
 int sdb_encrypt_password() {
-  static const int DISPLAY_MAX_LEN = 6;
+  static const uint DISPLAY_MAX_LEN = 1;
   int rc = 0;
   String src_password(sdb_password, &my_charset_bin);
 
