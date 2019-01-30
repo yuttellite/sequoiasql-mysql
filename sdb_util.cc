@@ -124,7 +124,7 @@ int sdb_rebuild_db_name_of_temp_table(char *db_name, int db_name_max_size) {
   db_name[hostname_len] = '#';
   memcpy(db_name, glob_hostname, hostname_len);
   db_name[tmp_name_len] = '\0';
-  for (uint i = 0; i < tmp_name_len; i++) {
+  for (int i = 0; i < tmp_name_len; i++) {
     if ('.' == db_name[i]) {
       db_name[i] = '_';
     }
