@@ -23,6 +23,8 @@
 #include "sdb_errcode.h"
 #include "sdb_util.h"
 #include "sdb_def.h"
+#include <json_dom.h>
+#include <item_json_func.h>
 
 #define BSON_APPEND(field_name, value, obj, arr_builder) \
   do {                                                   \
@@ -387,13 +389,35 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
         String *pStr = NULL;
         String conv_str;
         char buff[MAX_FIELD_WIDTH] = {0};
+        Json_wrapper wr;
+        String buf;
         String str(buff, sizeof(buff), item_val->charset_for_protocol());
 
-        if (Item::FUNC_ITEM == item_val->type() &&
-            (strcmp("cast_as_date", ((Item_func *)item_val)->func_name()) == 0 ||
-             strcmp("cast_as_datetime", ((Item_func *)item_val)->func_name()) == 0)) {
-          rc = SDB_ERR_COND_UNEXPECTED_ITEM;
-          goto error;
+        if (Item::FUNC_ITEM == item_val->type()) {
+          if (strcmp("cast_as_date", ((Item_func *)item_val)->func_name()) ==
+                  0 ||
+              strcmp("cast_as_datetime",
+                     ((Item_func *)item_val)->func_name()) == 0) {
+            rc = SDB_ERR_COND_UNEXPECTED_ITEM;
+            goto error;
+          } else if (strcmp("cast_as_json",
+                            ((Item_func *)item_val)->func_name()) == 0) {
+            Item_json_typecast *item_json = NULL;
+            item_json = dynamic_cast<Item_json_typecast *>(item_val);
+
+            if (!item_json || item_json->val_json(&wr)) {
+              rc = SDB_ERR_COND_UNEXPECTED_ITEM;
+              goto error;
+            }
+
+            buf.length(0);
+            if (wr.to_string(&buf, false,
+                             ((Item_func *)item_val)->func_name())) {
+              rc = SDB_ERR_COND_UNEXPECTED_ITEM;
+              goto error;
+            }
+            pStr = &buf;
+          }
         }
 
         if (Item::CACHE_ITEM == item_val->type() &&
@@ -403,10 +427,12 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
           goto error;
         }
 
-        pStr = item_val->val_str(&str);
-        if (NULL == pStr) {
-          rc = SDB_ERR_INVALID_ARG;
-          break;
+        if (!pStr) {
+          pStr = item_val->val_str(&str);
+          if (NULL == pStr) {
+            rc = SDB_ERR_INVALID_ARG;
+            break;
+          }
         }
 
         if (!my_charset_same(pStr->charset(), &my_charset_bin)) {
@@ -1279,8 +1305,8 @@ int Sdb_func_like::get_regex_str(const char *like_str, size_t len,
             '{' == *p_cur || '}' == *p_cur || '\\' == *p_cur || '^' == *p_cur ||
             '$' == *p_cur || '.' == *p_cur || '|' == *p_cur || '*' == *p_cur ||
             '+' == *p_cur || '?' == *p_cur || '-' == *p_cur) {
-          // process perl regexp special characters: {}[]()^$.|*+?-\
-          // add '\' before the special character
+          /* process perl regexp special characters: {}[]()^$.|*+?-\  */
+          /* add '\' before the special character */
           str_buf[buf_pos++] = '\\';
         }
         str_buf[buf_pos++] = *p_cur;
@@ -1291,8 +1317,8 @@ int Sdb_func_like::get_regex_str(const char *like_str, size_t len,
              '.' == *p_cur || '|' == *p_cur || '*' == *p_cur || '+' == *p_cur ||
              '?' == *p_cur || '-' == *p_cur || '\\' == *p_cur) &&
             (escape_char != *p_cur)) {
-          // process perl regexp special characters: {}[]()^$.|*+?-\
-          // add '\' before the special character
+          /* process perl regexp special characters: {}[]()^$.|*+?-\ */
+          /* add '\' before the special character */
           str_buf[buf_pos++] = '\\';
           str_buf[buf_pos++] = *p_cur;
         } else {
