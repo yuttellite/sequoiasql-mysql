@@ -63,38 +63,39 @@ static void sdb_password_update(THD *thd, struct st_mysql_sys_var *var,
 
 static MYSQL_SYSVAR_STR(conn_addr, sdb_conn_str,
                         PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_MEMALLOC,
-                        "SequoiaDB addresses (Default: localhost:11810)",
+                        "SequoiaDB addresses (Default: localhost:11810).",
                         sdb_conn_addr_validate, NULL, SDB_ADDR_DFT);
 static MYSQL_SYSVAR_STR(user, sdb_user,
                         PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_MEMALLOC,
                         "SequoiaDB authentication user "
-                        "(Default value is empty)",
+                        "(Default value is empty).",
                         NULL, NULL, SDB_USER_DFT);
 static MYSQL_SYSVAR_STR(password, sdb_password,
                         PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_MEMALLOC,
                         "SequoiaDB authentication password "
-                        "(Default value is empty)",
+                        "(Default value is empty).",
                         NULL, sdb_password_update, SDB_PASSWORD_DFT);
 static MYSQL_SYSVAR_BOOL(use_partition, sdb_use_partition, PLUGIN_VAR_OPCMDARG,
-                         "Create partition table on SequoiaDB (Default: on)",
+                         "Create partition table on SequoiaDB. "
+                         "Enabled by default.",
                          NULL, NULL, SDB_USE_PARTITION_DFT);
 static MYSQL_SYSVAR_BOOL(use_bulk_insert, sdb_use_bulk_insert,
                          PLUGIN_VAR_OPCMDARG,
-                         "Enable bulk insert to SequoiaDB (Default: on)", NULL,
-                         NULL, SDB_DEFAULT_USE_BULK_INSERT);
+                         "Enable bulk insert to SequoiaDB. Enabled by default.",
+                         NULL, NULL, SDB_DEFAULT_USE_BULK_INSERT);
 static MYSQL_SYSVAR_INT(bulk_insert_size, sdb_bulk_insert_size,
                         PLUGIN_VAR_OPCMDARG,
                         "Maximum number of records per bulk insert "
-                        "(Default: 100)",
+                        "(Default: 100).",
                         NULL, NULL, SDB_DEFAULT_BULK_INSERT_SIZE, 1, 100000, 0);
 static MYSQL_SYSVAR_BOOL(use_autocommit, sdb_use_autocommit,
                          PLUGIN_VAR_OPCMDARG,
-                         "Enable autocommit of SequoiaDB storage engine "
-                         "(Default: on)",
+                         "Enable autocommit of SequoiaDB storage engine. "
+                         "Enabled by default.",
                          NULL, NULL, SDB_DEFAULT_USE_AUTOCOMMIT);
 static MYSQL_SYSVAR_BOOL(debug_log, sdb_debug_log, PLUGIN_VAR_OPCMDARG,
-                         "Turn on debug log of SequoiaDB storage engine "
-                         "(Default: off)",
+                         "Turn on debug log of SequoiaDB storage engine. "
+                         "Disabled by default.",
                          NULL, NULL, SDB_DEBUG_LOG_DFT);
 
 struct st_mysql_sys_var *sdb_sys_vars[] = {MYSQL_SYSVAR(conn_addr),
