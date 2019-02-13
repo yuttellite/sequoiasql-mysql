@@ -40,7 +40,7 @@ static Sdb_rwlock sdb_password_lock;
 
 static int sdb_conn_addr_validate(THD *thd, struct st_mysql_sys_var *var,
                                   void *save, struct st_mysql_value *value) {
-  // The buffer size is not important. Because st_mysql_value::val_str 
+  // The buffer size is not important. Because st_mysql_value::val_str
   // internally calls the Item_string::val_str, which doesn't need a buffer.
   static const uint SDB_CONN_ADDR_BUF_SIZE = 3072;
   char buff[SDB_CONN_ADDR_BUF_SIZE];
@@ -49,7 +49,7 @@ static int sdb_conn_addr_validate(THD *thd, struct st_mysql_sys_var *var,
 
   Sdb_conn_addrs parser;
   int rc = parser.parse_conn_addrs(arg_conn_addr);
-  *static_cast<const char**>(save) = (0 == rc) ? arg_conn_addr : NULL;
+  *static_cast<const char **>(save) = (0 == rc) ? arg_conn_addr : NULL;
   return rc;
 }
 
@@ -63,33 +63,40 @@ static void sdb_password_update(THD *thd, struct st_mysql_sys_var *var,
 
 static MYSQL_SYSVAR_STR(conn_addr, sdb_conn_str,
                         PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_MEMALLOC,
-                        "SequoiaDB addresses", sdb_conn_addr_validate, NULL,
-                        SDB_ADDR_DFT);
+                        "SequoiaDB addresses (Default: localhost:11810).",
+                        sdb_conn_addr_validate, NULL, SDB_ADDR_DFT);
 static MYSQL_SYSVAR_STR(user, sdb_user,
                         PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_MEMALLOC,
-                        "SequoiaDB authentication user", NULL, NULL,
-                        SDB_USER_DFT);
+                        "SequoiaDB authentication user "
+                        "(Default value is empty).",
+                        NULL, NULL, SDB_USER_DFT);
 static MYSQL_SYSVAR_STR(password, sdb_password,
                         PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_MEMALLOC,
-                        "SequoiaDB authentication password",
-                        NULL, sdb_password_update,
-                        SDB_PASSWORD_DFT);
+                        "SequoiaDB authentication password "
+                        "(Default value is empty).",
+                        NULL, sdb_password_update, SDB_PASSWORD_DFT);
 static MYSQL_SYSVAR_BOOL(use_partition, sdb_use_partition, PLUGIN_VAR_OPCMDARG,
-                         "create partition table on sequoiadb", NULL, NULL,
-                         SDB_USE_PARTITION_DFT);
+                         "Create partition table on SequoiaDB. "
+                         "Enabled by default.",
+                         NULL, NULL, SDB_USE_PARTITION_DFT);
 static MYSQL_SYSVAR_BOOL(use_bulk_insert, sdb_use_bulk_insert,
-                         PLUGIN_VAR_OPCMDARG, "enable bulk insert to sequoiadb",
+                         PLUGIN_VAR_OPCMDARG,
+                         "Enable bulk insert to SequoiaDB. Enabled by default.",
                          NULL, NULL, SDB_DEFAULT_USE_BULK_INSERT);
 static MYSQL_SYSVAR_INT(bulk_insert_size, sdb_bulk_insert_size,
-                        PLUGIN_VAR_OPCMDARG, "bulk insert size", NULL, NULL,
-                        SDB_DEFAULT_BULK_INSERT_SIZE, 1, 100000, 0);
+                        PLUGIN_VAR_OPCMDARG,
+                        "Maximum number of records per bulk insert "
+                        "(Default: 100).",
+                        NULL, NULL, SDB_DEFAULT_BULK_INSERT_SIZE, 1, 100000, 0);
 static MYSQL_SYSVAR_BOOL(use_autocommit, sdb_use_autocommit,
                          PLUGIN_VAR_OPCMDARG,
-                         "enable autocommit of sequoiadb storage engine", NULL,
-                         NULL, SDB_DEFAULT_USE_AUTOCOMMIT);
+                         "Enable autocommit of SequoiaDB storage engine. "
+                         "Enabled by default.",
+                         NULL, NULL, SDB_DEFAULT_USE_AUTOCOMMIT);
 static MYSQL_SYSVAR_BOOL(debug_log, sdb_debug_log, PLUGIN_VAR_OPCMDARG,
-                         "turn on debug log of sequoiadb storage engine", NULL,
-                         NULL, SDB_DEBUG_LOG_DFT);
+                         "Turn on debug log of SequoiaDB storage engine. "
+                         "Disabled by default.",
+                         NULL, NULL, SDB_DEBUG_LOG_DFT);
 
 struct st_mysql_sys_var *sdb_sys_vars[] = {MYSQL_SYSVAR(conn_addr),
                                            MYSQL_SYSVAR(user),
