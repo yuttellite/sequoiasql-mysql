@@ -38,6 +38,27 @@
 static const uint MAX_TIME_DEC = 6;
 static const uint POWER_10[7] = {1, 10, 100, 1000, 10000, 100000, 1000000};
 
+// This function is similar to Item::get_timeval() but return true if value is
+// out of the supported range.
+static bool get_timeval(Item *item, struct timeval *tm) {
+  MYSQL_TIME ltime;
+  int warnings = 0;
+
+  if (item->get_date(&ltime, TIME_FUZZY_DATE)) {
+    goto error; /* Could not extract date from the value */
+  }
+
+  if (datetime_to_timeval(current_thd, &ltime, tm, &warnings)) {
+    goto error; /* Value is out of the supported range */
+  }
+
+  return false; /* Value is a good Unix timestamp */
+
+error:
+  tm->tv_sec = tm->tv_usec = 0;
+  return true;
+}
+
 int Sdb_logic_item::push(Sdb_item *cond_item) {
   int rc = 0;
   bson::BSONObj obj_tmp;
@@ -406,12 +427,9 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
     }
 
     case MYSQL_TYPE_TIMESTAMP: {
-      MYSQL_TIME ltime;
       struct timeval tm;
-      int warnings = 0;
       if (item_val->result_type() != STRING_RESULT ||
-          item_val->get_date(&ltime, TIME_FUZZY_DATE) ||
-          datetime_to_timeval(thd, &ltime, &tm, &warnings)) {
+          get_timeval(item_val, &tm)) {
         rc = SDB_ERR_COND_UNEXPECTED_ITEM;
         goto error;
       } else {
