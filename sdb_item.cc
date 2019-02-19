@@ -38,74 +38,13 @@
 static const uint MAX_TIME_DEC = 6;
 static const uint POWER_10[7] = {1, 10, 100, 1000, 10000, 100000, 1000000};
 
-// This function is similar to Item::get_date_from_string() but without warning.
-static bool get_date_from_item_string(Item *item, MYSQL_TIME *ltime,
-                                      my_time_flags_t flags) {
-  char buff[MAX_DATE_STRING_REP_LENGTH];
-  MYSQL_TIME_STATUS status;
-  THD *thd = current_thd;
-  String tmp(buff, sizeof(buff), &my_charset_bin), *res;
-  Dummy_error_handler error_handler;  // ignore all error and warning states
-  bool ret = true;
-
-  DBUG_ASSERT(NULL != item);
-  DBUG_ASSERT(NULL != ltime);
-
-  thd->push_internal_handler(&error_handler);
-
-  if (!(res = item->val_str(&tmp))) {
-    set_zero_time(ltime, MYSQL_TIMESTAMP_DATETIME);
-    ret = true;
-    goto done;
-  }
-
-  if (thd->variables.sql_mode & MODE_NO_ZERO_DATE) {
-    flags |= TIME_NO_ZERO_DATE;
-  }
-  if (thd->variables.sql_mode & MODE_INVALID_DATES) {
-    flags |= TIME_INVALID_DATES;
-  }
-
-  ret = str_to_datetime(res, ltime, flags, &status);
-
-done:
-  thd->pop_internal_handler();
-  return ret;
-}
-
-// This function is similar to Item::get_time_from_string() but without warning.
-static bool get_time_from_item_string(Item *item, MYSQL_TIME *ltime) {
-  char buff[MAX_DATE_STRING_REP_LENGTH];
-  MYSQL_TIME_STATUS status;
-  THD *thd = current_thd;
-  String tmp(buff, sizeof(buff), &my_charset_bin), *res;
-  Dummy_error_handler error_handler;  // ignore all error and warning states
-  bool ret = true;
-
-  DBUG_ASSERT(NULL != item);
-  DBUG_ASSERT(NULL != ltime);
-
-  thd->push_internal_handler(&error_handler);
-
-  if (!(res = item->val_str(&tmp))) {
-    set_zero_time(ltime, MYSQL_TIMESTAMP_TIME);
-    ret = true;
-    goto done;
-  }
-
-  ret = str_to_time(res, ltime, 0, &status);
-
-done:
-  thd->pop_internal_handler();
-  return ret;
-}
-
-// This function is similar to Item::get_timeval() but without warning.
+// This function is similar to Item::get_timeval() but return true if value is
+// out of the supported range.
 static bool get_timeval(Item *item, struct timeval *tm) {
   MYSQL_TIME ltime;
   int warnings = 0;
 
-  if (get_date_from_item_string(item, &ltime, TIME_FUZZY_DATE)) {
+  if (item->get_date(&ltime, TIME_FUZZY_DATE)) {
     goto error; /* Could not extract date from the value */
   }
 
@@ -253,6 +192,15 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
                                 Field *field, bson::BSONObj &obj,
                                 bson::BSONArrayBuilder *arr_builder) {
   int rc = SDB_ERR_OK;
+  THD *thd = current_thd;
+  // When type casting is needed, some mysql functions may raise warning,
+  // so we use `Dummy_error_handler` to ignore all error and warning states.
+  Dummy_error_handler error_handler;
+  my_bool has_err_handler = false;
+  if (can_ignore_warning(item_val->type())) {
+    thd->push_internal_handler(&error_handler);
+    has_err_handler = true;
+  }
 
   if (NULL == item_val || !item_val->const_item() ||
       (Item::FUNC_ITEM == item_val->type() &&
@@ -329,20 +277,11 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
           // pass through
         }
         case DECIMAL_RESULT: {
-          // ignore all error and warning states
-          Dummy_error_handler error_handler;
-
           if (MYSQL_TYPE_FLOAT == field->type()) {
-            THD *thd = current_thd;
-            thd->push_internal_handler(&error_handler);
             float value = (float)item_val->val_real();
-            thd->pop_internal_handler();
             BSON_APPEND(field_name, value, obj, arr_builder);
           } else if (MYSQL_TYPE_DOUBLE == field->type()) {
-            THD *thd = current_thd;
-            thd->push_internal_handler(&error_handler);
             double value = item_val->val_real();
-            thd->pop_internal_handler();
             BSON_APPEND(field_name, value, obj, arr_builder);
           } else {
             bson::bsonDecimal decimal;
@@ -394,14 +333,12 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
         String str(buff, sizeof(buff), item_val->charset_for_protocol());
 
         if (Item::FUNC_ITEM == item_val->type()) {
-          if (strcmp("cast_as_date", ((Item_func *)item_val)->func_name()) ==
-                  0 ||
-              strcmp("cast_as_datetime",
-                     ((Item_func *)item_val)->func_name()) == 0) {
+          const char *func_name = ((Item_func *)item_val)->func_name();
+          if (0 == strcmp("cast_as_date", func_name) ||
+              0 == strcmp("cast_as_datetime", func_name)) {
             rc = SDB_ERR_COND_UNEXPECTED_ITEM;
             goto error;
-          } else if (strcmp("cast_as_json",
-                            ((Item_func *)item_val)->func_name()) == 0) {
+          } else if (0 == strcmp("cast_as_json", func_name)) {
             Item_json_typecast *item_json = NULL;
             item_json = dynamic_cast<Item_json_typecast *>(item_val);
 
@@ -411,8 +348,7 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
             }
 
             buf.length(0);
-            if (wr.to_string(&buf, false,
-                             ((Item_func *)item_val)->func_name())) {
+            if (wr.to_string(&buf, false, func_name)) {
               rc = SDB_ERR_COND_UNEXPECTED_ITEM;
               goto error;
             }
@@ -469,7 +405,7 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
     case MYSQL_TYPE_DATE: {
       MYSQL_TIME ltime;
       if (STRING_RESULT == item_val->result_type() &&
-          !get_date_from_item_string(item_val, &ltime, TIME_FUZZY_DATE)) {
+          !item_val->get_date(&ltime, TIME_FUZZY_DATE)) {
         struct tm tm_val;
         tm_val.tm_sec = ltime.second;
         tm_val.tm_min = ltime.minute;
@@ -518,8 +454,8 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
     case MYSQL_TYPE_DATETIME: {
       MYSQL_TIME ltime;
       if (item_val->result_type() != STRING_RESULT ||
-          get_date_from_item_string(item_val, &ltime, TIME_FUZZY_DATE) ||
-          ltime.year > 9999 || ltime.year < 1000) {
+          item_val->get_date(&ltime, TIME_FUZZY_DATE) || ltime.year > 9999 ||
+          ltime.year < 1000) {
         rc = SDB_ERR_COND_UNEXPECTED_ITEM;
         goto error;
       } else {
@@ -540,7 +476,7 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
     case MYSQL_TYPE_TIME: {
       MYSQL_TIME ltime;
       if (STRING_RESULT == item_val->result_type() &&
-          !get_time_from_item_string(item_val, &ltime)) {
+          !item_val->get_time(&ltime)) {
         uint dec = field->decimals();
         double time = ltime.hour;
         time = time * 100 + ltime.minute;
@@ -604,9 +540,27 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
     }
   }
 
+  // If the item fails to get the value(by val_int, val_date_temporal...),
+  // null_value will be set as true. It may happen when doing cast, math,
+  // subselect...
+  if (item_val->null_value) {
+    rc = SDB_ERR_COND_UNEXPECTED_ITEM;
+    goto error;
+  }
+
 done:
+  if (has_err_handler) {
+    thd->pop_internal_handler();
+  }
   return rc;
 error:
+  // clear the cache to prevent important errors/warnings from being
+  // ignored.
+  if (has_err_handler && item_val->null_value) {
+    if (Item::CACHE_ITEM == item_val->type()) {
+      ((Item_cache *)item_val)->clear();
+    }
+  }
   goto done;
 }
 
