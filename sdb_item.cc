@@ -382,11 +382,9 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
     }
 
     case MYSQL_TYPE_DATE: {
-      if (STRING_RESULT == item_val->result_type()) {
-        MYSQL_TIME ltime;
-        longlong tmp = item_val->val_date_temporal();
-        TIME_from_longlong_datetime_packed(&ltime, tmp);
-
+      MYSQL_TIME ltime;
+      if (STRING_RESULT == item_val->result_type() &&
+          !item_val->get_date(&ltime, TIME_FUZZY_DATE)) {
         struct tm tm_val;
         tm_val.tm_sec = ltime.second;
         tm_val.tm_min = ltime.minute;
@@ -408,17 +406,15 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
     }
 
     case MYSQL_TYPE_TIMESTAMP: {
-      if (STRING_RESULT == item_val->result_type()) {
-        struct timeval tm;
-        MYSQL_TIME ltime;
-        int warnings = 0;
-        longlong tmp = item_val->val_date_temporal();
-        TIME_from_longlong_datetime_packed(&ltime, tmp);
-        if (datetime_to_timeval(current_thd, &ltime, &tm, &warnings)) {
-          rc = SDB_ERR_COND_UNEXPECTED_ITEM;
-          goto error;
-        }
-
+      MYSQL_TIME ltime;
+      struct timeval tm;
+      int warnings = 0;
+      if (item_val->result_type() != STRING_RESULT ||
+          item_val->get_date(&ltime, TIME_FUZZY_DATE) ||
+          datetime_to_timeval(thd, &ltime, &tm, &warnings)) {
+        rc = SDB_ERR_COND_UNEXPECTED_ITEM;
+        goto error;
+      } else {
         uint dec = field->decimals();
         if (dec < 6) {
           uint power = POWER_10[MAX_TIME_DEC - dec];
@@ -433,23 +429,18 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
         } else {
           arr_builder->appendTimestamp(time_val);
         }
-      } else {
-        rc = SDB_ERR_COND_UNEXPECTED_ITEM;
-        goto error;
       }
       break;
     }
 
     case MYSQL_TYPE_DATETIME: {
-      if (STRING_RESULT == item_val->result_type()) {
-        MYSQL_TIME ltime;
-        longlong tmp = item_val->val_date_temporal();
-        TIME_from_longlong_datetime_packed(&ltime, tmp);
-        if (ltime.year > 9999 || ltime.year < 1000) {
-          rc = SDB_ERR_COND_UNEXPECTED_ITEM;
-          goto error;
-        }
-
+      MYSQL_TIME ltime;
+      if (item_val->result_type() != STRING_RESULT ||
+          item_val->get_date(&ltime, TIME_FUZZY_DATE) || ltime.year > 9999 ||
+          ltime.year < 1000) {
+        rc = SDB_ERR_COND_UNEXPECTED_ITEM;
+        goto error;
+      } else {
         uint dec = field->decimals();
         char buff[MAX_FIELD_WIDTH];
         int len = sprintf(buff, "%04u-%02u-%02u %s%02u:%02u:%02u", ltime.year,
@@ -460,19 +451,14 @@ int Sdb_func_item::get_item_val(const char *field_name, Item *item_val,
         }
 
         BSON_APPEND(field_name, buff, obj, arr_builder);
-      } else {
-        rc = SDB_ERR_COND_UNEXPECTED_ITEM;
-        goto error;
       }
       break;
     }
 
     case MYSQL_TYPE_TIME: {
-      if (STRING_RESULT == item_val->result_type()) {
-        MYSQL_TIME ltime;
-        longlong tmp = item_val->val_time_temporal();
-        TIME_from_longlong_time_packed(&ltime, tmp);
-
+      MYSQL_TIME ltime;
+      if (STRING_RESULT == item_val->result_type() &&
+          !item_val->get_time(&ltime)) {
         uint dec = field->decimals();
         double time = ltime.hour;
         time = time * 100 + ltime.minute;
