@@ -1963,6 +1963,8 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
   Sdb_cl cl;
   bool create_temporary = (create_info->options & HA_LEX_CREATE_TMP_TABLE);
   bson::BSONObj options;
+  bool created_cs = false;
+  bool created_cl = false;
 
   for (Field **fields = form->field; *fields; fields++) {
     Field *field = *fields;
@@ -2012,7 +2014,7 @@ int ha_sdb::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) {
   }
   DBUG_ASSERT(conn->thread_id() == ha_thd()->thread_id());
 
-  rc = conn->create_cl(db_name, table_name, options);
+  rc = conn->create_cl(db_name, table_name, options, &created_cs, &created_cl);
   if (0 != rc) {
     goto error;
   }
@@ -2035,6 +2037,11 @@ done:
   return rc;
 error:
   convert_sdb_code(rc);
+  if (created_cs) {
+    conn->drop_cs(db_name);
+  } else if (created_cl) {
+    conn->drop_cl(db_name, table_name);
+  }
   goto done;
 }
 

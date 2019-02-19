@@ -46,7 +46,8 @@ class Sdb_conn {
   int get_cl(char *cs_name, char *cl_name, Sdb_cl &cl);
 
   int create_cl(char *cs_name, char *cl_name,
-                const bson::BSONObj &options = SDB_EMPTY_BSON);
+                const bson::BSONObj &options = SDB_EMPTY_BSON,
+                bool *created_cs = NULL, bool *created_cl = NULL);
 
   int rename_cl(char *cs_name, char *old_cl_name, char *new_cl_name);
 

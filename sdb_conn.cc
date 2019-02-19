@@ -151,16 +151,21 @@ error:
 }
 
 int Sdb_conn::create_cl(char *cs_name, char *cl_name,
-                        const bson::BSONObj &options) {
+                        const bson::BSONObj &options, bool *created_cs,
+                        bool *created_cl) {
   int rc = SDB_ERR_OK;
   int retry_times = 2;
   sdbclient::sdbCollectionSpace cs;
   sdbclient::sdbCollection cl;
+  bool new_cs = false;
+  bool new_cl = false;
 
 retry:
   rc = m_connection.createCollectionSpace(cs_name, 4096, cs);
   if (SDB_DMS_CS_EXIST == rc) {
     rc = m_connection.getCollectionSpace(cs_name, cs);
+  } else if (SDB_OK == rc) {
+    new_cs = true;
   }
   if (rc != SDB_ERR_OK) {
     goto error;
@@ -169,12 +174,20 @@ retry:
   rc = cs.createCollection(cl_name, options, cl);
   if (SDB_DMS_EXIST == rc) {
     rc = cs.getCollection(cl_name, cl);
+  } else if (SDB_OK == rc) {
+    new_cl = true;
   }
   if (rc != SDB_ERR_OK) {
     goto error;
   }
 
 done:
+  if (created_cs) {
+    *created_cs = new_cs;
+  }
+  if (created_cl) {
+    *created_cl = new_cl;
+  }
   return rc;
 error:
   if (IS_SDB_NET_ERR(rc)) {
@@ -183,6 +196,14 @@ error:
     }
   }
   convert_sdb_code(rc);
+  if (new_cs) {
+    drop_cs(cs_name);
+    new_cs = false;
+    new_cl = false;
+  } else if (new_cl) {
+    drop_cl(cs_name, cl_name);
+    new_cl = false;
+  }
   goto done;
 }
 
