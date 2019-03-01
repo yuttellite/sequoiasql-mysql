@@ -2270,7 +2270,11 @@ void ha_sdb::build_auto_inc_option(const Field *field,
   ulonglong default_value = 0;
   ulonglong start_value = 1;
   struct system_variables *variables = &ha_thd()->variables;
-  ulonglong max_value = field->get_max_int_value();
+  longlong max_value = field->get_max_int_value();
+  if (max_value < 0 && ((Field_num *)field)->unsigned_flag) {
+    max_value = 0x7FFFFFFFFFFFFFFFULL;
+  }
+
   if (create_info->auto_increment_value > 0) {
     start_value = create_info->auto_increment_value;
   }
@@ -2283,7 +2287,7 @@ void ha_sdb::build_auto_inc_option(const Field *field,
   build.append(SDB_FIELD_START_VALUE, (longlong)start_value);
   build.append(SDB_FIELD_ACQUIRE_SIZE, (int)default_value);
   build.append(SDB_FIELD_CACHE_SIZE, (int)default_value);
-  build.append(SDB_FIELD_MAX_VALUE, (longlong)field->get_max_int_value());
+  build.append(SDB_FIELD_MAX_VALUE, max_value);
 
   option = build.obj();
 }
