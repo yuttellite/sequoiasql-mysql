@@ -2395,7 +2395,7 @@ mysql_declare_plugin(sequoiadb){
     PLUGIN_LICENSE_GPL,
     sdb_init_func, /* Plugin Init */
     sdb_done_func, /* Plugin Deinit */
-    0x0300,        /* version */
+    0x0302,        /* version */
     NULL,          /* status variables */
     sdb_sys_vars,  /* system variables */
     NULL,          /* config options */
