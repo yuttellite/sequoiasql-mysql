@@ -221,17 +221,17 @@ uint ha_sdb::max_supported_keys() const {
 }
 
 uint ha_sdb::max_supported_key_length() const {
-  return 1000;
+  return 4096;
 }
 
 #if MYSQL_VERSION_ID >= 50723
 uint ha_sdb::max_supported_key_part_length(
     HA_CREATE_INFO *create_info MY_ATTRIBUTE((unused))) const {
-  return 1000;
+  return max_supported_key_length();
 }
 #else
 uint ha_sdb::max_supported_key_part_length() const {
-  return 1000;
+  return max_supported_key_length();
 }
 #endif
 
