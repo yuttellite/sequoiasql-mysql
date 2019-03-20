@@ -68,6 +68,8 @@ using namespace sdbclient;
 #define SDB_OID_FIELD "_id"
 #define SDB_FIELD_MAX_LEN (16 * 1024 * 1024)
 
+#define SDB_COMMENT "sequoiadb"
+
 const static char *sdb_plugin_info = SDB_ENGINE_INFO ". " SDB_VERSION_INFO ".";
 
 handlerton *sdb_hton = NULL;
@@ -1976,12 +1978,33 @@ int ha_sdb::get_cl_options(TABLE *form, HA_CREATE_INFO *create_info,
   bson::BSONObj sharding_key;
 
   if (create_info && create_info->comment.str) {
+    char *sdb_cmt_pos = NULL;
     bson::BSONElement be_options;
     bson::BSONObj comments;
+    if ((sdb_cmt_pos = strstr(create_info->comment.str, SDB_COMMENT)) == NULL) {
+      goto comment_done;
+    }
 
-    rc = bson::fromjson(create_info->comment.str, comments);
+    sdb_cmt_pos += strlen(SDB_COMMENT);
+    while (*sdb_cmt_pos != '\0' && my_isspace(&SDB_CHARSET, *sdb_cmt_pos)) {
+      sdb_cmt_pos++;
+    }
+
+    if (*sdb_cmt_pos != ':') {
+      rc = SDB_ERR_INVALID_ARG;
+      my_printf_error(rc, "Failed to parse comment: '%-.192s'", MYF(0),
+                      create_info->comment.str);
+      goto error;
+    }
+
+    sdb_cmt_pos += 1;
+    while (*sdb_cmt_pos != '\0' && my_isspace(&SDB_CHARSET, *sdb_cmt_pos)) {
+      sdb_cmt_pos++;
+    }
+
+    rc = bson::fromjson(sdb_cmt_pos, comments);
     if (0 != rc) {
-      SDB_PRINT_ERROR(rc, "Failed to parse comment: '%-.192s'",
+      my_printf_error(rc, "Failed to parse comment: '%-.192s'", MYF(0),
                       create_info->comment.str);
       goto error;
     }
@@ -1992,11 +2015,11 @@ int ha_sdb::get_cl_options(TABLE *form, HA_CREATE_INFO *create_info,
       goto done;
     } else if (be_options.type() != bson::EOO) {
       rc = SDB_ERR_INVALID_ARG;
-      SDB_PRINT_ERROR(rc, "Failed to parse cl_options!");
+      my_printf_error(rc, "Failed to parse cl_options!", MYF(0));
       goto error;
     }
   }
-
+comment_done:
   if (!use_partition) {
     goto done;
   }
