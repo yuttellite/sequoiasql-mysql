@@ -2021,6 +2021,9 @@ int ha_sdb::get_cl_options(TABLE *form, HA_CREATE_INFO *create_info,
   }
 comment_done:
   if (!use_partition) {
+    options = BSON("Compressed" << true << "CompressionType"
+                                << "lzw"
+                                << "ReplSize" << sdb_replica_size);
     goto done;
   }
 
@@ -2033,7 +2036,12 @@ comment_done:
     options = BSON("ShardingKey" << sharding_key << "AutoSplit" << true
                                  << "EnsureShardingIndex" << false
                                  << "Compressed" << true << "CompressionType"
-                                 << "lzw");
+                                 << "lzw"
+                                 << "ReplSize" << sdb_replica_size);
+  } else {
+    options = BSON("Compressed" << true << "CompressionType"
+                                << "lzw"
+                                << "ReplSize" << sdb_replica_size);
   }
 
 done:
