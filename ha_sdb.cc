@@ -1210,8 +1210,12 @@ int ha_sdb::bson_element_to_field(const bson::BSONElement elem, Field *field) {
       field->store_timestamp(&tv);
       break;
     }
+    case bson::Bool: {
+      bool val = elem.boolean();
+      field->store(val ? 1 : 0, true);
+      break;
+    }
     case bson::Object:
-    case bson::Bool:
     default:
       rc = SDB_ERR_TYPE_UNSUPPORTED;
       goto error;
