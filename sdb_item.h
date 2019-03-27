@@ -26,8 +26,12 @@ class Sdb_item : public Sql_alloc {
   Sdb_item() : is_finished(FALSE) {}
   virtual ~Sdb_item(){};
 
-  virtual int push(Sdb_item *cond_item) { return SDB_ERR_COND_UNEXPECTED_ITEM; }
-  virtual int push(Item *cond_item) { return SDB_ERR_COND_UNEXPECTED_ITEM; }
+  virtual int push_sdb_item(Sdb_item *cond_item) {
+    return SDB_ERR_COND_UNEXPECTED_ITEM;
+  }
+  virtual int push_item(Item *cond_item) {
+    return SDB_ERR_COND_UNEXPECTED_ITEM;
+  }
   virtual int to_bson(bson::BSONObj &obj) = 0;
   virtual const char *name() = 0;
   virtual bool finished() { return is_finished; };
@@ -41,8 +45,8 @@ class Sdb_item : public Sql_alloc {
 class Sdb_logic_item : public Sdb_item {
  public:
   Sdb_logic_item() { is_ok = TRUE; }
-  virtual int push(Sdb_item *cond_item);
-  virtual int push(Item *cond_item);
+  virtual int push_sdb_item(Sdb_item *cond_item);
+  virtual int push_item(Item *cond_item);
   virtual int to_bson(bson::BSONObj &obj);
   virtual const char *name() = 0;
   virtual Item_func::Functype type() = 0;
@@ -76,9 +80,9 @@ class Sdb_func_item : public Sdb_item {
   Sdb_func_item();
   virtual ~Sdb_func_item();
 
-  virtual int push(Sdb_item *cond_item);
-  virtual int push(Item *cond_item);
-  virtual int pop(Item *&para_item);
+  virtual int push_sdb_item(Sdb_item *cond_item);
+  virtual int push_item(Item *cond_item);
+  virtual int pop_item(Item *&para_item);
   virtual void update_stat();
   virtual int get_item_val(const char *field_name, Item *item_val, Field *field,
                            bson::BSONObj &obj,
@@ -97,7 +101,7 @@ class Sdb_func_item : public Sdb_item {
   Sdb_item *r_child;
 
  private:
-  inline my_bool can_ignore_warning(enum Item::Type type) { 
+  inline my_bool can_ignore_warning(enum Item::Type type) {
     return (Item::SUBSELECT_ITEM != type);
   }
 };
@@ -271,7 +275,9 @@ class Sdb_func_like : public Sdb_func_bin_op {
   virtual ~Sdb_func_like();
 
   virtual int to_bson(bson::BSONObj &obj);
-  virtual int push(Sdb_item *cond_item) { return SDB_ERR_COND_UNEXPECTED_ITEM; }
+  virtual int push_sdb_item(Sdb_item *cond_item) {
+    return SDB_ERR_COND_UNEXPECTED_ITEM;
+  }
   virtual const char *name() { return "like"; }
   virtual Item_func::Functype type() { return Item_func::LIKE_FUNC; }
 

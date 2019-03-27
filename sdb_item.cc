@@ -59,7 +59,7 @@ error:
   return true;
 }
 
-int Sdb_logic_item::push(Sdb_item *cond_item) {
+int Sdb_logic_item::push_sdb_item(Sdb_item *cond_item) {
   int rc = 0;
   bson::BSONObj obj_tmp;
 
@@ -88,7 +88,7 @@ error:
   goto done;
 }
 
-int Sdb_logic_item::push(Item *cond_item) {
+int Sdb_logic_item::push_item(Item *cond_item) {
   if (NULL != cond_item) {
     return SDB_ERR_COND_UNEXPECTED_ITEM;
   }
@@ -134,7 +134,7 @@ void Sdb_func_item::update_stat() {
   }
 }
 
-int Sdb_func_item::push(Sdb_item *cond_item) {
+int Sdb_func_item::push_sdb_item(Sdb_item *cond_item) {
   int rc = SDB_ERR_OK;
   if (cond_item->type() != Item_func::UNKNOWN_FUNC) {
     rc = SDB_ERR_COND_UNEXPECTED_ITEM;
@@ -142,7 +142,7 @@ int Sdb_func_item::push(Sdb_item *cond_item) {
   }
 
   if (((Sdb_func_unkown *)cond_item)->get_func_item()->const_item()) {
-    rc = push(((Sdb_func_unkown *)cond_item)->get_func_item());
+    rc = push_item(((Sdb_func_unkown *)cond_item)->get_func_item());
     if (rc != SDB_ERR_OK) {
       goto error;
     }
@@ -165,7 +165,7 @@ error:
   goto done;
 }
 
-int Sdb_func_item::push(Item *cond_item) {
+int Sdb_func_item::push_item(Item *cond_item) {
   int rc = SDB_ERR_OK;
 
   if (is_finished) {
@@ -180,7 +180,7 @@ error:
   goto done;
 }
 
-int Sdb_func_item::pop(Item *&para_item) {
+int Sdb_func_item::pop_item(Item *&para_item) {
   if (para_list.is_empty()) {
     return SDB_ERR_EOF;
   }
@@ -693,7 +693,7 @@ int Sdb_func_cmp::to_bson_with_child(bson::BSONObj &obj) {
     goto error;
   }
 
-  if (sdb_func->pop(field1) || sdb_func->pop(field2)) {
+  if (sdb_func->pop_item(field1) || sdb_func->pop_item(field2)) {
     rc = SDB_ERR_COND_UNEXPECTED_ITEM;
     goto error;
   }

@@ -58,7 +58,7 @@ void Sdb_cond_ctx::pop_all() {
 
     if (!cur_item->finished()) {
       if (Item_func::COND_AND_FUNC == cur_item->type()) {
-        cur_item->push((Item *)NULL);
+        cur_item->push_item((Item *)NULL);
       } else {
         delete cur_item;
         cur_item = NULL;
@@ -69,7 +69,7 @@ void Sdb_cond_ctx::pop_all() {
 
     item_tmp = cur_item;
     cur_item = item_list.pop();
-    if (0 != cur_item->push(item_tmp)) {
+    if (0 != cur_item->push_sdb_item(item_tmp)) {
       delete item_tmp;
     }
   }
@@ -94,7 +94,7 @@ void Sdb_cond_ctx::pop() {
 
     item_tmp = cur_item;
     cur_item = item_list.pop();
-    rc = cur_item->push(item_tmp);
+    rc = cur_item->push_sdb_item(item_tmp);
     if (0 != rc) {
       delete item_tmp;
       goto error;
@@ -160,7 +160,7 @@ void Sdb_cond_ctx::push(Item *item) {
   if (NULL != cur_item) {
     if (NULL == cond_item || (Item::FUNC_ITEM != cond_item->type() &&
                               Item::COND_ITEM != cond_item->type())) {
-      rc = cur_item->push(cond_item);
+      rc = cur_item->push_item(cond_item);
       if (0 != rc) {
         goto error;
       }
