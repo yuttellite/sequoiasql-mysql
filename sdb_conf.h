@@ -54,6 +54,7 @@ extern char *sdb_user;
 extern my_bool sdb_use_partition;
 extern my_bool sdb_use_bulk_insert;
 extern int sdb_bulk_insert_size;
+extern int sdb_replica_size;
 extern my_bool sdb_use_autocommit;
 extern my_bool sdb_debug_log;
 extern st_mysql_sys_var *sdb_sys_vars[];

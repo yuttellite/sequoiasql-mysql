@@ -24,6 +24,7 @@ static const my_bool SDB_DEBUG_LOG_DFT = FALSE;
 static const my_bool SDB_DEFAULT_USE_BULK_INSERT = TRUE;
 static const my_bool SDB_DEFAULT_USE_AUTOCOMMIT = TRUE;
 static const int SDB_DEFAULT_BULK_INSERT_SIZE = 100;
+static const int SDB_DEFAULT_REPLICA_SIZE = -1;
 
 char *sdb_conn_str = NULL;
 char *sdb_user = NULL;
@@ -31,6 +32,7 @@ char *sdb_password = NULL;
 my_bool sdb_use_partition = SDB_USE_PARTITION_DFT;
 my_bool sdb_use_bulk_insert = SDB_DEFAULT_USE_BULK_INSERT;
 int sdb_bulk_insert_size = SDB_DEFAULT_BULK_INSERT_SIZE;
+int sdb_replica_size = SDB_DEFAULT_REPLICA_SIZE;
 my_bool sdb_use_autocommit = SDB_DEFAULT_USE_AUTOCOMMIT;
 my_bool sdb_debug_log = SDB_DEBUG_LOG_DFT;
 
@@ -88,6 +90,10 @@ static MYSQL_SYSVAR_INT(bulk_insert_size, sdb_bulk_insert_size,
                         "Maximum number of records per bulk insert "
                         "(Default: 100).",
                         NULL, NULL, SDB_DEFAULT_BULK_INSERT_SIZE, 1, 100000, 0);
+static MYSQL_SYSVAR_INT(replica_size, sdb_replica_size, PLUGIN_VAR_OPCMDARG,
+                        "Replica size of write operations "
+                        "(Default: -1).",
+                        NULL, NULL, SDB_DEFAULT_REPLICA_SIZE, -1, 7, 0);
 static MYSQL_SYSVAR_BOOL(use_autocommit, sdb_use_autocommit,
                          PLUGIN_VAR_OPCMDARG,
                          "Enable autocommit of SequoiaDB storage engine. "
@@ -98,15 +104,12 @@ static MYSQL_SYSVAR_BOOL(debug_log, sdb_debug_log, PLUGIN_VAR_OPCMDARG,
                          "Disabled by default.",
                          NULL, NULL, SDB_DEBUG_LOG_DFT);
 
-struct st_mysql_sys_var *sdb_sys_vars[] = {MYSQL_SYSVAR(conn_addr),
-                                           MYSQL_SYSVAR(user),
-                                           MYSQL_SYSVAR(password),
-                                           MYSQL_SYSVAR(use_partition),
-                                           MYSQL_SYSVAR(use_bulk_insert),
-                                           MYSQL_SYSVAR(bulk_insert_size),
-                                           MYSQL_SYSVAR(use_autocommit),
-                                           MYSQL_SYSVAR(debug_log),
-                                           NULL};
+struct st_mysql_sys_var *sdb_sys_vars[] = {
+    MYSQL_SYSVAR(conn_addr),       MYSQL_SYSVAR(user),
+    MYSQL_SYSVAR(password),        MYSQL_SYSVAR(use_partition),
+    MYSQL_SYSVAR(use_bulk_insert), MYSQL_SYSVAR(bulk_insert_size),
+    MYSQL_SYSVAR(replica_size),    MYSQL_SYSVAR(use_autocommit),
+    MYSQL_SYSVAR(debug_log),       NULL};
 
 Sdb_conn_addrs::Sdb_conn_addrs() : conn_num(0) {
   for (int i = 0; i < SDB_COORD_NUM_MAX; i++) {
