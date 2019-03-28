@@ -206,10 +206,8 @@ ulonglong ha_sdb::table_flags() const {
 }
 
 ulong ha_sdb::index_flags(uint inx, uint part, bool all_parts) const {
-  // TODO: SUPPORT SORT
-  // HA_READ_NEXT | HA_KEYREAD_ONLY ;
   return (HA_READ_RANGE | HA_DO_INDEX_COND_PUSHDOWN | HA_READ_NEXT |
-          HA_READ_ORDER);
+          HA_READ_ORDER | HA_KEYREAD_ONLY);
 }
 
 uint ha_sdb::max_supported_record_length() const {
